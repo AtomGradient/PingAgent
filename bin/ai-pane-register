@@ -73,9 +73,11 @@ WATCH_PID_FILE="$MAILBOX/.watch-$ROLE.pid"
 WATCH_LOG="$MAILBOX/.watch-$ROLE.log"
 WATCH_CMD_PATTERN="ai-collab-watch $ROLE $MAILBOX"
 
-EXISTING=$(pgrep -f "$WATCH_CMD_PATTERN" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+# pgrep 找不到匹配会 exit 1，配合 set -e + pipefail 会让整个脚本静默退出。
+# 因此显式吞掉 non-zero。
+EXISTING=$(pgrep -f "$WATCH_CMD_PATTERN" 2>/dev/null || true)
 if [[ -n "$EXISTING" ]]; then
-  echo "Killing existing watcher(s) for $ROLE: $EXISTING"
+  echo "Killing existing watcher(s) for $ROLE: $(echo "$EXISTING" | tr '\n' ' ')"
   pkill -f "$WATCH_CMD_PATTERN" 2>/dev/null || true
   pkill -f "fswatch.*$MAILBOX/inbox/$ROLE" 2>/dev/null || true
   sleep 0.3
@@ -97,10 +99,8 @@ if ! kill -0 "$WATCH_PID" 2>/dev/null; then
   rm -f "$WATCH_PID_FILE"
   exit 1
 fi
-RUNNING=$(pgrep -f "$WATCH_CMD_PATTERN" 2>/dev/null | wc -l | tr -d ' ')
-if [[ "$RUNNING" -gt 1 ]]; then
-  echo "WARNING: $RUNNING watcher processes for '$ROLE' (expected 1). Investigate." >&2
-fi
+# 不在这里做 pgrep count（process substitution 的 subshell 会让计数翻倍误报）；
+# orphan 防护由前面的预先 pkill 负责。
 echo "Watcher started (pid $WATCH_PID, log $WATCH_LOG)"
 
 # .gitignore reminder
