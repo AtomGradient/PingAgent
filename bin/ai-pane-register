@@ -32,6 +32,26 @@ fi
 MAILBOX="$PWD/.ai-mailbox"
 mkdir -p "$MAILBOX/inbox/$ROLE" "$MAILBOX/sent" "$MAILBOX/.panes"
 
+# 检测是否在覆盖已有的 different-UUID 注册（防止用户没意识到老 pane 被静默 orphan）
+PREV_PANE_FILE="$MAILBOX/.panes/$ROLE.json"
+if [[ -f "$PREV_PANE_FILE" ]]; then
+  if command -v jq >/dev/null 2>&1; then
+    PREV_UUID=$(jq -r '.session_uuid // ""' "$PREV_PANE_FILE" 2>/dev/null || echo "")
+  else
+    PREV_UUID=$(grep '"session_uuid"' "$PREV_PANE_FILE" | sed 's/.*"session_uuid": *"\([^"]*\)".*/\1/' | head -n 1)
+  fi
+  if [[ -n "$PREV_UUID" && "$PREV_UUID" != "$SESSION_UUID" ]]; then
+    echo ""
+    echo "WARNING: '$ROLE' was previously registered to a different iTerm session:"
+    echo "  prev: $PREV_UUID"
+    echo "  now:  $SESSION_UUID"
+    echo "Replacing it now — that other pane will be silently orphaned (still running"
+    echo "but no longer receiving ai-collab notifications). If that other pane still"
+    echo "matters, abort with Ctrl-C and run 'ai-pane-unregister $ROLE' from it first."
+    echo ""
+  fi
+fi
+
 # Write pane info
 cat > "$MAILBOX/.panes/$ROLE.json" <<EOF
 {
@@ -46,28 +66,42 @@ EOF
 echo "Registered '$ROLE' -> session $SESSION_UUID"
 echo "  mailbox: $MAILBOX"
 
-# Start watcher if not already running for this role+cwd
+# 启动 watcher：每次 register 都做幂等 reset，避免 orphan watcher 累积。
+# nohup 之后 watcher 会被 reparent 到 init，单纯 kill PID 文件里那个 pid 不够，
+# 必须按 cmdline 把同一 role+mailbox 的所有进程一并清掉。
 WATCH_PID_FILE="$MAILBOX/.watch-$ROLE.pid"
 WATCH_LOG="$MAILBOX/.watch-$ROLE.log"
+WATCH_CMD_PATTERN="ai-collab-watch $ROLE $MAILBOX"
 
-if [[ -f "$WATCH_PID_FILE" ]] && kill -0 "$(cat "$WATCH_PID_FILE" 2>/dev/null)" 2>/dev/null; then
-  echo "Watcher already running (pid $(cat "$WATCH_PID_FILE"))"
-else
-  rm -f "$WATCH_PID_FILE"
-  # Start watcher detached
-  nohup ai-collab-watch "$ROLE" "$MAILBOX" >> "$WATCH_LOG" 2>&1 &
-  WATCH_PID=$!
-  echo "$WATCH_PID" > "$WATCH_PID_FILE"
-  disown 2>/dev/null || true
+EXISTING=$(pgrep -f "$WATCH_CMD_PATTERN" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+if [[ -n "$EXISTING" ]]; then
+  echo "Killing existing watcher(s) for $ROLE: $EXISTING"
+  pkill -f "$WATCH_CMD_PATTERN" 2>/dev/null || true
+  pkill -f "fswatch.*$MAILBOX/inbox/$ROLE" 2>/dev/null || true
   sleep 0.3
-  if kill -0 "$WATCH_PID" 2>/dev/null; then
-    echo "Watcher started (pid $WATCH_PID, log $WATCH_LOG)"
-  else
-    echo "Watcher failed to start. See $WATCH_LOG" >&2
-    rm -f "$WATCH_PID_FILE"
-    exit 1
-  fi
+  pkill -9 -f "$WATCH_CMD_PATTERN" 2>/dev/null || true
+  pkill -9 -f "fswatch.*$MAILBOX/inbox/$ROLE" 2>/dev/null || true
+  sleep 0.2
 fi
+rm -f "$WATCH_PID_FILE"
+
+# 起新 watcher
+nohup ai-collab-watch "$ROLE" "$MAILBOX" >> "$WATCH_LOG" 2>&1 &
+WATCH_PID=$!
+echo "$WATCH_PID" > "$WATCH_PID_FILE"
+disown 2>/dev/null || true
+sleep 0.4
+
+if ! kill -0 "$WATCH_PID" 2>/dev/null; then
+  echo "Watcher failed to start. See $WATCH_LOG" >&2
+  rm -f "$WATCH_PID_FILE"
+  exit 1
+fi
+RUNNING=$(pgrep -f "$WATCH_CMD_PATTERN" 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$RUNNING" -gt 1 ]]; then
+  echo "WARNING: $RUNNING watcher processes for '$ROLE' (expected 1). Investigate." >&2
+fi
+echo "Watcher started (pid $WATCH_PID, log $WATCH_LOG)"
 
 # .gitignore reminder
 GITIGNORE="$PWD/.gitignore"
