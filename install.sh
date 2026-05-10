@@ -49,6 +49,12 @@ rm -f "$TPL_DST"
 ln -s "$REPO_ROOT/AGENTS.md" "$TPL_DST"
 echo "  link  $TPL_DST -> $REPO_ROOT/AGENTS.md"
 
+# ai-ping CLI reference (also symlinked so AIs can Read it from anywhere)
+GUIDE_DST="$CONF_DIR/ai-ping.md"
+rm -f "$GUIDE_DST"
+ln -s "$REPO_ROOT/docs/ai-ping.md" "$GUIDE_DST"
+echo "  link  $GUIDE_DST -> $REPO_ROOT/docs/ai-ping.md"
+
 echo ""
 echo "Installed to: $BIN_DEST"
 

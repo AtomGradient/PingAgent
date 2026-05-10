@@ -134,7 +134,7 @@ ai-ping <to> --wait --timeout 600 --file ...               # block until reply
 echo "..." | ai-ping <to>                                  # stdin
 ```
 
-Full kind table: see [`AGENTS.md`](AGENTS.md).
+Full kind table, parameter reference, error catalog, end-to-end review example: see [`docs/ai-ping.md`](docs/ai-ping.md).
 
 ## Project layout (when PingAgent is in use)
 

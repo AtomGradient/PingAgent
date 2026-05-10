@@ -16,6 +16,10 @@ if [[ -e "$CONF_DIR/AGENTS-template.md" || -L "$CONF_DIR/AGENTS-template.md" ]];
   rm -f "$CONF_DIR/AGENTS-template.md"
   echo "  removed $CONF_DIR/AGENTS-template.md"
 fi
+if [[ -e "$CONF_DIR/ai-ping.md" || -L "$CONF_DIR/ai-ping.md" ]]; then
+  rm -f "$CONF_DIR/ai-ping.md"
+  echo "  removed $CONF_DIR/ai-ping.md"
+fi
 
 echo ""
 echo "Uninstalled. (Project-level .ai-mailbox/ directories were not touched.)"

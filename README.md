@@ -131,7 +131,7 @@ ai-ping <to> --wait --timeout 600 --file ...               # 阻塞等回复
 echo "..." | ai-ping <to>                                  # stdin
 ```
 
-完整 kind 表见 [`AGENTS.md`](AGENTS.md)。
+完整 kind 表、参数详解、错误排查、完整 review 往返示例见 [`docs/ai-ping.md`](docs/ai-ping.md)。
 
 ## 目录结构（每个使用了 PingAgent 的项目）
 
