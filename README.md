@@ -1,3 +1,5 @@
+[English](README.en.md) | **中文**
+
 # PingAgent
 
 > 让两个 iTerm2 pane 里的 AI 助手（如 Codex 与 Claude Code）按需自动互发消息：一边写代码、一边审代码，不用你手动 copy-paste。
@@ -91,6 +93,15 @@ claude               # 启动 Claude Code
 2. 启动 `ai-collab-watch <role>` 后台进程（log 在 `.ai-mailbox/.watch-<role>.log`）
 3. 检测重复启动（PID 还活就不重起）
 
+**关闭 pane 之前**（可选清理）：
+
+```bash
+ai-pane-unregister           # 从当前 pane 的 session id 自动反查 role
+ai-pane-unregister codex     # 也可以显式传
+```
+
+会做三件事：杀掉 watcher（连同子进程 fswatch）、清掉 PID 文件、删掉 `.panes/<role>.json`。inbox/sent/dispatched 历史不动。忘了跑也没关系——下次 `ai-pane-register` 会复用同一个 role slot。
+
 ### 验证
 
 启动两个 pane 后，在 codex 的 pane 里手动跑一下：
@@ -111,6 +122,7 @@ claude 应该 Read 那个文件、然后用 `ai-ping codex --reply-to <id> "..."
 
 ```bash
 ai-pane-register <role>                                    # 在每个 pane 启动时跑一次
+ai-pane-unregister [<role>]                                # 关闭 pane 时清理（可选）
 ai-ping <to> <message>                                     # 简单消息
 ai-ping <to> --file <path>                                 # 长内容（推荐）
 ai-ping <to> --kind review-request --file ...              # 指定 kind

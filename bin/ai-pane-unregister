@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# ai-pane-unregister [<role>]
+# 停止本 pane 的 watcher，清理注册文件。
+# 不传 role 时，从当前 iTerm2 session id 自动反查。
+# 不动 inbox/sent/dispatched 文件（消息历史保留）。
+set -euo pipefail
+
+ROLE="${1:-}"
+
+# 找到最近的 .ai-mailbox/
+MAILBOX=""
+DIR="$PWD"
+while [[ "$DIR" != "/" && "$DIR" != "" ]]; do
+  if [[ -d "$DIR/.ai-mailbox" ]]; then
+    MAILBOX="$DIR/.ai-mailbox"
+    break
+  fi
+  DIR="$(dirname "$DIR")"
+done
+if [[ -z "$MAILBOX" ]]; then
+  echo "No .ai-mailbox/ found upward from $PWD" >&2
+  exit 1
+fi
+
+# 自动检测 role（从当前 ITERM_SESSION_ID）
+if [[ -z "$ROLE" ]]; then
+  if [[ -n "${ITERM_SESSION_ID:-}" ]]; then
+    SESSION_UUID="${ITERM_SESSION_ID##*:}"
+    for f in "$MAILBOX/.panes/"*.json; do
+      [[ -f "$f" ]] || continue
+      if grep -q "\"session_uuid\": *\"$SESSION_UUID\"" "$f" 2>/dev/null; then
+        ROLE=$(basename "$f" .json)
+        break
+      fi
+    done
+  fi
+  if [[ -z "$ROLE" ]]; then
+    echo "Cannot auto-detect role. Either:" >&2
+    echo "  1) pass <role> explicitly: ai-pane-unregister <role>" >&2
+    echo "  2) run from the same iTerm2 pane that ran ai-pane-register" >&2
+    echo "" >&2
+    echo "Currently registered:" >&2
+    for f in "$MAILBOX/.panes/"*.json; do
+      [[ -f "$f" ]] && echo "  $(basename "$f" .json)" >&2
+    done
+    exit 1
+  fi
+  echo "Auto-detected role: $ROLE"
+fi
+
+PID_FILE="$MAILBOX/.watch-$ROLE.pid"
+PANE_FILE="$MAILBOX/.panes/$ROLE.json"
+
+did_anything=false
+
+# 1. Kill watcher via PID file（连同子进程 fswatch）
+if [[ -f "$PID_FILE" ]]; then
+  did_anything=true
+  PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+  if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
+    # 先杀子进程（fswatch），再杀父
+    pkill -P "$PID" 2>/dev/null || true
+    kill "$PID" 2>/dev/null || true
+    sleep 0.3
+    if kill -0 "$PID" 2>/dev/null; then
+      kill -9 "$PID" 2>/dev/null || true
+      pkill -9 -P "$PID" 2>/dev/null || true
+    fi
+    echo "Stopped watcher (pid $PID)"
+  else
+    echo "Watcher PID file stale (pid $PID not running) — cleaning"
+  fi
+  rm -f "$PID_FILE"
+fi
+
+# 2. 兜底：杀任何匹配 cmdline 的孤儿 watcher
+if pkill -f "ai-collab-watch $ROLE $MAILBOX" 2>/dev/null; then
+  echo "Killed orphan watcher(s) matching 'ai-collab-watch $ROLE $MAILBOX'"
+  did_anything=true
+fi
+
+# 3. 删 pane 注册
+if [[ -f "$PANE_FILE" ]]; then
+  rm -f "$PANE_FILE"
+  echo "Removed $PANE_FILE"
+  did_anything=true
+fi
+
+if ! $did_anything; then
+  echo "Nothing to do: '$ROLE' was not registered."
+fi
+
+echo "Unregistered: $ROLE"
+echo "(Inbox/sent/dispatched files preserved. Delete .ai-mailbox/ manually if you want a clean slate.)"

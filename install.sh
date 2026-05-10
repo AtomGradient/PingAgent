@@ -27,7 +27,7 @@ done
 mkdir -p "$BIN_DEST" "$CONF_DIR"
 
 # Install scripts
-for script in ai-pane-register ai-ping ai-collab-watch; do
+for script in ai-pane-register ai-pane-unregister ai-ping ai-collab-watch; do
   src="$BIN_SRC/$script"
   dst="$BIN_DEST/$script"
   if [[ ! -f "$src" ]]; then
@@ -82,3 +82,5 @@ echo "  4) In each iTerm2 pane, before starting the AI:"
 echo "       ai-pane-register codex     # in pane A"
 echo "       ai-pane-register claude    # in pane B"
 echo "  5) Then start codex / claude in each pane respectively."
+echo "  6) When you're done with a pane (optional cleanup):"
+echo "       ai-pane-unregister         # auto-detects role from current pane"

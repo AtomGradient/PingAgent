@@ -28,6 +28,9 @@ fi
 INBOX="$MAILBOX/inbox/$ROLE"
 mkdir -p "$INBOX"
 
+# 收到信号时把 fswatch 等子进程一起带走（避免孤儿）
+trap 'pkill -P $$ 2>/dev/null || true' EXIT TERM INT HUP
+
 log() {
   echo "[$(date "+%Y-%m-%d %H:%M:%S")] $*"
 }
