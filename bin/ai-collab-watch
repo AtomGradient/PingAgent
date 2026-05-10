@@ -37,11 +37,15 @@ log() {
 }
 
 # 用 osascript 把一行字注入到指定 session（作为用户输入，自动提交）。
-# 关键点：
-# 1. 单个大 -e + 块式 tell（多 -e 拼 + `tell ... to ...` 会触发 -2741 syntax error）
-# 2. 末尾用 CR (\r, ASCII 13) 不用 LF (\n)：Ink/blessed 这类 TUI（Claude Code、Codex）
-#    把 \r 当 Enter，把 \n 当"换行字符"——单纯 \n 只会让文字进输入框但不提交。
-#    iTerm2 `write text` 默认追加的是 LF，所以必须手动加 CR + 禁用默认 newline。
+# 关键点（经过实测踩坑得出）：
+# 1. 单个大 -e + 块式 tell（多 -e 拼 + `tell ... to ...` 会触发 -2741 syntax error）。
+# 2. 末尾用 CR (\r, ASCII 13)。Ink/blessed 这类 TUI（Claude Code、Codex）把 \r 当
+#    Enter，把 \n 当"换行字符"——单纯 \n 只会让文字进输入框但不提交。
+# 3. **正文和 CR 必须分两次 write text 发**。如果 `write text (msg & CR) newline false`
+#    一起发，iTerm2 会把整段当作一次 bracketed paste（\e[200~...\e[201~ 包起来），
+#    Ink TUI 在 paste 模式里把所有字符（含尾部 CR）当文本内容插入输入框、不触发 Enter。
+#    实测：单独发一个孤立 CR 就能把卡住的输入框提交，确认了 paste 抑制是根因。
+#    分两次发使第二次 write 不会被裹进同一个 paste，CR 作为独立字节流到达就当 Enter。
 inject() {
   local msg="$1"
   /usr/bin/osascript \
@@ -56,7 +60,9 @@ on run argv
         repeat with aSession in sessions of aTab
           if id of aSession is targetID then
             tell aSession
-              write text (targetMsg & CR) newline false
+              write text targetMsg newline false
+              delay 0.05
+              write text CR newline false
             end tell
             return "ok"
           end if
