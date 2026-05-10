@@ -28,33 +28,41 @@ fi
 INBOX="$MAILBOX/inbox/$ROLE"
 mkdir -p "$INBOX"
 
-# 收到信号时把 fswatch 等子进程一起带走（避免孤儿）
-trap 'pkill -P $$ 2>/dev/null || true' EXIT TERM INT HUP
+# 收到信号时把 fswatch 等子进程一起带走（避免孤儿）。
+# 不 trap HUP：让 nohup 启动的 watcher 在父 shell 退出时正常存活。
+trap 'pkill -P $$ 2>/dev/null || true' EXIT TERM INT
 
 log() {
   echo "[$(date "+%Y-%m-%d %H:%M:%S")] $*"
 }
 
-# 用 osascript 把一行字注入到指定 session（作为用户输入，会自动提交）
+# 用 osascript 把一行字注入到指定 session（作为用户输入，会自动提交）。
+# 注意：必须用「单个大 -e + 块式 tell」组合。
+# 多 -e 拼接 + `tell ... to ...` 单行式会触发 -2741 syntax error。
 inject() {
   local msg="$1"
   /usr/bin/osascript \
-    -e 'on run argv' \
-    -e '  set targetID to item 1 of argv' \
-    -e '  set targetMsg to item 2 of argv' \
-    -e '  tell application "iTerm2"' \
-    -e '    repeat with aWindow in windows' \
-    -e '      repeat with aTab in tabs of aWindow' \
-    -e '        repeat with aSession in sessions of aTab' \
-    -e '          if id of aSession is targetID then' \
-    -e '            tell aSession to write text targetMsg' \
-    -e '            return "ok"' \
-    -e '          end if' \
-    -e '        end repeat' \
-    -e '      end repeat' \
-    -e '    end repeat' \
-    -e '    return "session not found"' \
-    -e 'end run' \
+    -e '
+on run argv
+  set targetID to item 1 of argv
+  set targetMsg to item 2 of argv
+  tell application "iTerm2"
+    repeat with aWindow in windows
+      repeat with aTab in tabs of aWindow
+        repeat with aSession in sessions of aTab
+          if id of aSession is targetID then
+            tell aSession
+              write text targetMsg
+            end tell
+            return "ok"
+          end if
+        end repeat
+      end repeat
+    end repeat
+    return "session not found: " & targetID
+  end tell
+end run
+' \
     -- "$SESSION_UUID" "$msg" 2>&1
 }
 
