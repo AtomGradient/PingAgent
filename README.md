@@ -1,0 +1,178 @@
+# PingAgent
+
+> 让两个 iTerm2 pane 里的 AI 助手（如 Codex 与 Claude Code）按需自动互发消息：一边写代码、一边审代码，不用你手动 copy-paste。
+
+```
+┌─ iTerm2 Pane A: Codex ─────────┐    ┌─ iTerm2 Pane B: Claude Code ───┐
+│  > 写完 src/auth.ts            │    │                                │
+│  > $ ai-ping claude --file ... │    │  ← osascript 注入一行通知      │
+│                                │    │  [ai-collab 收信] from=codex   │
+│                                │    │   请 Read .ai-mailbox/inbox/   │
+│                                │    │   claude/...md 并审核           │
+│                                │    │  > Read .ai-mailbox/...        │
+│                                │    │  > 审核完毕                    │
+│  ← osascript 注入回执通知      │    │  > $ ai-ping codex --reply-to  │
+│  [ai-collab 收信] from=claude  │    │                                │
+└────────────────────────────────┘    └────────────────────────────────┘
+                          ↓                          ↑
+                    .ai-mailbox/inbox/<role>/<msg>.md
+                    （消息正文走文件系统，跨 pane 注入只是短通知）
+```
+
+## 核心思路
+
+- **消息内容走文件系统**：markdown 文件 + YAML frontmatter，无 shell 转义地狱、无多行内容丢失、有完整历史
+- **跨 pane 注入只发短通知**：`[ai-collab 收信] ... 请 Read <path>`，AI 看到后自己读文件
+- **每个 pane 一个 watcher**：用 fswatch 监听本 pane 的 inbox，新消息到达就 osascript 注入本 pane
+- **用户随时可介入**：两个 pane 都还是普通 terminal，user 直接打字 / Ctrl-C 都正常
+
+## 依赖
+
+- macOS + iTerm2（用 `osascript` 控制 session，因此目前**仅 macOS**）
+- bash 3.2+（macOS 自带即可）
+- `jq`（macOS 自带 / `brew install jq`）
+- `fswatch`（可选，没有就回退到 1s 轮询；推荐 `brew install fswatch`）
+
+## 安装
+
+```bash
+git clone git@github.com:AtomGradient/PingAgent.git
+cd PingAgent
+./install.sh                  # 默认 symlink 到 ~/.local/bin/
+# 或 ./install.sh --copy      # 复制（不依赖 repo 路径）
+```
+
+`install.sh` 会：
+- 把 `bin/ai-pane-register`、`bin/ai-ping`、`bin/ai-collab-watch` 链接到 `~/.local/bin/`
+- 把 `AGENTS.md` 链接到 `~/.config/ai-collab/AGENTS-template.md`（方便从任意目录拷贝到项目里）
+- 检查 PATH，提示装 fswatch（如未装）
+
+确认安装：
+
+```bash
+which ai-ping ai-pane-register ai-collab-watch
+ai-ping --help
+```
+
+## 用法（每个项目）
+
+### 一次性初始化
+
+```bash
+cd <你的项目>
+
+# 1) 把协议说明放进项目（让两个 AI 都读到）
+cp ~/.config/ai-collab/AGENTS-template.md ./AGENTS.md
+# 如果 Claude Code 读 CLAUDE.md，可以再 ln：
+ln -sf AGENTS.md CLAUDE.md
+
+# 2) 加 .gitignore
+echo '.ai-mailbox/' >> .gitignore
+```
+
+### 每次开新 iTerm2 pane
+
+**Pane A（跑 Codex 的）：**
+```bash
+cd <你的项目>
+ai-pane-register codex
+codex                # 或 codex chat、或你的实际启动命令
+```
+
+**Pane B（跑 Claude Code 的）：**
+```bash
+cd <你的项目>
+ai-pane-register claude
+claude               # 启动 Claude Code
+```
+
+`ai-pane-register` 做三件事：
+1. 把当前 pane 的 `$ITERM_SESSION_ID` UUID 存到 `.ai-mailbox/.panes/<role>.json`
+2. 启动 `ai-collab-watch <role>` 后台进程（log 在 `.ai-mailbox/.watch-<role>.log`）
+3. 检测重复启动（PID 还活就不重起）
+
+### 验证
+
+启动两个 pane 后，在 codex 的 pane 里手动跑一下：
+
+```bash
+ai-ping claude "测试消息：你能看到这条吗？"
+```
+
+预期：claude 那个 pane 的输入框里**自动出现并提交**：
+
+```
+[ai-collab 收信] from=codex kind=msg id=... | 请 Read .ai-mailbox/inbox/claude/...md 并按其中说明处理...
+```
+
+claude 应该 Read 那个文件、然后用 `ai-ping codex --reply-to <id> "..."` 回执，codex pane 也会收到通知。
+
+## CLI 速查
+
+```bash
+ai-pane-register <role>                                    # 在每个 pane 启动时跑一次
+ai-ping <to> <message>                                     # 简单消息
+ai-ping <to> --file <path>                                 # 长内容（推荐）
+ai-ping <to> --kind review-request --file ...              # 指定 kind
+ai-ping <to> --reply-to <id> --file ...                    # 回复
+ai-ping <to> --wait --timeout 600 --file ...               # 阻塞等回复
+echo "..." | ai-ping <to>                                  # stdin
+```
+
+完整 kind 表见 [`AGENTS.md`](AGENTS.md)。
+
+## 目录结构（每个使用了 PingAgent 的项目）
+
+```
+<your-project>/
+├── AGENTS.md                       # 协议说明（你 cp 进来的）
+├── .gitignore                      # 包含 .ai-mailbox/
+└── .ai-mailbox/                    # gitignore 的工作目录
+    ├── .panes/
+    │   ├── codex.json              # role + iTerm session UUID + cwd
+    │   └── claude.json
+    ├── inbox/
+    │   ├── codex/<msg-id>.md       # 给 codex 的消息
+    │   └── claude/<msg-id>.md      # 给 claude 的消息
+    ├── sent/<msg-id>.md            # 自己发出消息的副本（audit log）
+    ├── .watch-codex.pid            # watcher PID
+    ├── .watch-codex.log            # watcher 日志
+    ├── .watch-claude.pid
+    └── .watch-claude.log
+```
+
+## 设计选择 / 已知限制
+
+- **通知内容只放路径不放正文**：避免 osascript 转义/换行问题，AI 自己 Read 文件读全文
+- **`.dispatched` sidecar 去重**：watcher 重启不会重发同一条消息；用文件而非内存，bash 3.2 也跑
+- **atomic write**：`mktemp + mv`，watcher 不会读到半截写入的文件
+- **`sent/` 是 audit log**：发件人那边永远有副本，方便追溯
+- **`--wait` 默认 300s**：低于 Claude Code Bash tool 上限 600s，避免误超时
+- **watcher 是 per-cwd 的**：换项目要重新 register（每个项目独立 mailbox）
+- **`--wait` 是轮询不是事件**（2s 一次）：要事件级可改成 socket-based，目前没需要
+- **macOS only**：osascript 是 macOS 特有；Linux 要换成 tmux send-keys 之类，欢迎 PR
+
+## 排错
+
+**注册了但对方收不到通知**：
+- 检查 `.ai-mailbox/.watch-<role>.log` 里有没有 `dispatching` 这一行
+- `ps aux | grep ai-collab-watch` 看 watcher 进程是否还活着
+- 若 watcher 死了：再跑一次 `ai-pane-register <role>`
+- 若 watcher 活着但没注入：osascript 可能被 macOS 安全策略拦了，给 iTerm2 加 Accessibility 权限
+
+**`session not found`**：
+- iTerm2 重启或换 pane 后 UUID 失效。重跑 `ai-pane-register <role>`
+
+**消息被重复触发**：
+- 通常是因为 `.dispatched` sidecar 没建（watcher 第一次跑挂了）。`rm .ai-mailbox/inbox/<role>/*.dispatched` 后只保留你想重发的那条
+
+**`ai-ping` 提示 `Cannot auto-detect --from`**：
+- 你不在已注册的 pane 里。要么去注册过的 pane 里跑，要么 `ai-ping ... --from <role>` 显式传
+
+## 协议说明（给 AI 看）
+
+完整协议见 [`AGENTS.md`](AGENTS.md)。把它 cp 到项目根目录，两个 AI 启动时会自动读到。
+
+## License
+
+MIT

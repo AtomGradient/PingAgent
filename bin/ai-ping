@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# ai-ping <to> [options] [<message>]
+# 把消息写进 .ai-mailbox/inbox/<to>/。watcher 会负责转发到对方 pane。
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: ai-ping <to> [options] [<message words...>]
+
+Required:
+  <to>                 目标 role (e.g. claude, codex)
+
+Options:
+  --file <path>        从文件读消息正文（推荐：长内容/带代码块）
+  --kind <kind>        消息类型 (default: msg). e.g. review-request, review-response
+  --reply-to <id>      这条是对某条消息的回复
+  --from <role>        显式指定发送者（默认从当前 pane 自动检测）
+  --wait               阻塞等待对方回复（轮询 .ai-mailbox/inbox/<from>/，匹配 reply_to）
+  --timeout <sec>      --wait 超时（默认 300）
+  --                   后续参数当成消息正文
+
+示例：
+  ai-ping claude "请审核 src/auth.ts 的并发"
+  ai-ping claude --kind review-request --file /tmp/req.md
+  ai-ping codex --kind review-response --reply-to 20260511-153000-abc123 --file /tmp/review.md
+  ai-ping claude --wait --timeout 600 -- "blocking question"
+EOF
+  exit 1
+}
+
+[[ $# -lt 1 ]] && usage
+case "$1" in -h|--help) usage ;; esac
+
+TO="$1"; shift
+FROM=""
+KIND="msg"
+REPLY_TO=""
+WAIT=false
+TIMEOUT=300
+FILE=""
+MSG=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --file)      FILE="$2"; shift 2 ;;
+    --kind)      KIND="$2"; shift 2 ;;
+    --reply-to)  REPLY_TO="$2"; shift 2 ;;
+    --from)      FROM="$2"; shift 2 ;;
+    --wait)      WAIT=true; shift ;;
+    --timeout)   TIMEOUT="$2"; shift 2 ;;
+    --)          shift; MSG="$*"; break ;;
+    -*)          echo "Unknown option: $1" >&2; usage ;;
+    *)           MSG="${MSG:+$MSG }$1"; shift ;;
+  esac
+done
+
+# 找到最近的 .ai-mailbox/（向上查找）
+MAILBOX=""
+DIR="$PWD"
+while [[ "$DIR" != "/" && "$DIR" != "" ]]; do
+  if [[ -d "$DIR/.ai-mailbox" ]]; then
+    MAILBOX="$DIR/.ai-mailbox"
+    break
+  fi
+  DIR="$(dirname "$DIR")"
+done
+if [[ -z "$MAILBOX" ]]; then
+  echo "No .ai-mailbox/ found upward from $PWD" >&2
+  echo "Run 'ai-pane-register <role>' in your project root first." >&2
+  exit 1
+fi
+
+# 自动检测 FROM（从当前 pane 的 ITERM_SESSION_ID 反查 .panes/）
+if [[ -z "$FROM" ]]; then
+  if [[ -n "${ITERM_SESSION_ID:-}" ]]; then
+    SESSION_UUID="${ITERM_SESSION_ID##*:}"
+    for f in "$MAILBOX/.panes/"*.json; do
+      [[ -f "$f" ]] || continue
+      if grep -q "\"session_uuid\": *\"$SESSION_UUID\"" "$f" 2>/dev/null; then
+        FROM=$(basename "$f" .json)
+        break
+      fi
+    done
+  fi
+  if [[ -z "$FROM" ]]; then
+    echo "Cannot auto-detect --from. Either:" >&2
+    echo "  1) run ai-pane-register <role> first, or" >&2
+    echo "  2) pass --from <role> explicitly" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$FROM" == "$TO" ]]; then
+  echo "Cannot ping yourself (from=to=$FROM)" >&2
+  exit 1
+fi
+
+# 校验目标 pane 已注册
+if [[ ! -f "$MAILBOX/.panes/$TO.json" ]]; then
+  echo "Warning: target '$TO' not registered yet. Message will queue in inbox." >&2
+fi
+
+# 生成消息 ID
+TS=$(date "+%Y%m%d-%H%M%S")
+RAND=$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 6 || printf '%06x' $RANDOM$RANDOM | head -c 6)
+MSG_ID="${TS}-${RAND}"
+
+# 读取消息正文
+BODY=""
+if [[ -n "$FILE" ]]; then
+  if [[ ! -f "$FILE" ]]; then
+    echo "File not found: $FILE" >&2
+    exit 1
+  fi
+  BODY=$(cat "$FILE")
+elif [[ -n "$MSG" ]]; then
+  BODY="$MSG"
+elif [[ ! -t 0 ]]; then
+  # stdin
+  BODY=$(cat)
+else
+  echo "No message body. Use --file, pass message as args, or pipe via stdin." >&2
+  exit 1
+fi
+
+if [[ -z "$BODY" ]]; then
+  echo "Empty message body." >&2
+  exit 1
+fi
+
+# 写入消息文件（atomic：tmp + rename）
+TARGET_INBOX="$MAILBOX/inbox/$TO"
+mkdir -p "$TARGET_INBOX" "$MAILBOX/sent"
+TARGET_FILE="$TARGET_INBOX/${MSG_ID}.md"
+TMP=$(mktemp "$TARGET_INBOX/.tmp.XXXXXX")
+
+{
+  echo "---"
+  echo "id: $MSG_ID"
+  echo "from: $FROM"
+  echo "to: $TO"
+  echo "kind: $KIND"
+  echo "created: $(date "+%Y-%m-%dT%H:%M:%S%z")"
+  if [[ -n "$REPLY_TO" ]]; then
+    echo "reply_to: $REPLY_TO"
+  fi
+  echo "---"
+  echo ""
+  printf '%s\n' "$BODY"
+} > "$TMP"
+
+mv "$TMP" "$TARGET_FILE"
+
+# audit log
+cp "$TARGET_FILE" "$MAILBOX/sent/${MSG_ID}.md"
+
+echo "Sent: $MSG_ID  ($FROM -> $TO, kind=$KIND${REPLY_TO:+, reply_to=$REPLY_TO})"
+echo "  $TARGET_FILE"
+
+# --wait: 轮询自己 inbox 找 reply_to=$MSG_ID 的回复
+if $WAIT; then
+  echo "Waiting for reply to $MSG_ID (timeout ${TIMEOUT}s)..."
+  REPLY_INBOX="$MAILBOX/inbox/$FROM"
+  mkdir -p "$REPLY_INBOX"
+  ELAPSED=0
+  INTERVAL=2
+  while (( ELAPSED < TIMEOUT )); do
+    for f in "$REPLY_INBOX"/*.md; do
+      [[ -f "$f" ]] || continue
+      if grep -qE "^reply_to: *$MSG_ID *$" "$f" 2>/dev/null; then
+        echo ""
+        echo "=== Reply received: $(basename "$f") ==="
+        cat "$f"
+        exit 0
+      fi
+    done
+    sleep "$INTERVAL"
+    ELAPSED=$((ELAPSED + INTERVAL))
+  done
+  echo "Timeout after ${TIMEOUT}s — no reply yet. Message remains in inbox." >&2
+  exit 2
+fi

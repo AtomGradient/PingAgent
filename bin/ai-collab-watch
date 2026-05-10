@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# ai-collab-watch <role> <mailbox-dir>
+# 监听 .ai-mailbox/inbox/<role>/ 的新消息文件，用 osascript 把短通知注入本 pane。
+# 通常由 ai-pane-register 自动启动，不需要手动跑。
+set -euo pipefail
+
+ROLE="${1:?usage: ai-collab-watch <role> <mailbox>}"
+MAILBOX="${2:?usage: ai-collab-watch <role> <mailbox>}"
+
+PANES_FILE="$MAILBOX/.panes/$ROLE.json"
+if [[ ! -f "$PANES_FILE" ]]; then
+  echo "Pane not registered: $PANES_FILE not found" >&2
+  exit 1
+fi
+
+# 用 jq 抽 session_uuid（如果没 jq 用 grep）
+if command -v jq >/dev/null 2>&1; then
+  SESSION_UUID=$(jq -r .session_uuid "$PANES_FILE")
+else
+  SESSION_UUID=$(grep '"session_uuid"' "$PANES_FILE" | sed 's/.*"session_uuid": *"\([^"]*\)".*/\1/')
+fi
+
+if [[ -z "$SESSION_UUID" || "$SESSION_UUID" == "null" ]]; then
+  echo "Cannot read session_uuid from $PANES_FILE" >&2
+  exit 1
+fi
+
+INBOX="$MAILBOX/inbox/$ROLE"
+mkdir -p "$INBOX"
+
+log() {
+  echo "[$(date "+%Y-%m-%d %H:%M:%S")] $*"
+}
+
+# 用 osascript 把一行字注入到指定 session（作为用户输入，会自动提交）
+inject() {
+  local msg="$1"
+  /usr/bin/osascript \
+    -e 'on run argv' \
+    -e '  set targetID to item 1 of argv' \
+    -e '  set targetMsg to item 2 of argv' \
+    -e '  tell application "iTerm2"' \
+    -e '    repeat with aWindow in windows' \
+    -e '      repeat with aTab in tabs of aWindow' \
+    -e '        repeat with aSession in sessions of aTab' \
+    -e '          if id of aSession is targetID then' \
+    -e '            tell aSession to write text targetMsg' \
+    -e '            return "ok"' \
+    -e '          end if' \
+    -e '        end repeat' \
+    -e '      end repeat' \
+    -e '    end repeat' \
+    -e '    return "session not found"' \
+    -e 'end run' \
+    -- "$SESSION_UUID" "$msg" 2>&1
+}
+
+# 解析 frontmatter 字段
+extract_field() {
+  local file="$1" key="$2"
+  # 只在前 30 行的 frontmatter 区域查找
+  head -n 30 "$file" | sed -n "s/^${key}: *\(.*\) *$/\1/p" | head -n 1
+}
+
+process_file() {
+  local path="$1"
+  [[ -f "$path" ]] || return 0
+  local fname
+  fname=$(basename "$path")
+
+  # 跳过 dot 文件、tmp 文件、非 .md、已处理过的
+  case "$fname" in
+    .*) return 0 ;;
+    *.md) ;;
+    *) return 0 ;;
+  esac
+  if [[ -f "${path}.dispatched" ]]; then
+    return 0
+  fi
+
+  # 抢占式标记：先 touch sidecar，再 inject。即使 inject 失败也不会重复触发。
+  touch "${path}.dispatched" 2>/dev/null || return 0
+
+  local sender kind id reply_to
+  sender=$(extract_field "$path" from)
+  kind=$(extract_field "$path" kind)
+  id=$(extract_field "$path" id)
+  reply_to=$(extract_field "$path" reply_to)
+
+  # 计算项目根（mailbox 的父目录）
+  local project_root rel_path
+  project_root=$(dirname "$MAILBOX")
+  rel_path=".ai-mailbox/inbox/$ROLE/$fname"
+
+  # 构造给 AI 的通知（一行，避免在 TUI 输入框里换行）
+  local notif
+  if [[ -n "$reply_to" ]]; then
+    notif="[ai-collab 收信] from=$sender kind=$kind id=$id reply_to=$reply_to | 请 Read $rel_path 并按其中说明处理；这是对你之前消息(id=$reply_to)的回复"
+  else
+    notif="[ai-collab 收信] from=$sender kind=$kind id=$id | 请 Read $rel_path 并按其中说明处理；处理完用 ai-ping $sender --reply-to $id --file <你的回复.md>"
+  fi
+
+  log "dispatching: $fname (from=$sender, kind=$kind)"
+  if ! inject "$notif"; then
+    log "WARNING: inject failed for $fname"
+  fi
+}
+
+log "ai-collab-watch starting: role=$ROLE mailbox=$MAILBOX session=$SESSION_UUID"
+
+# 启动时扫描一次（处理 watcher 启动前已到达的消息）
+for f in "$INBOX"/*.md; do
+  [[ -f "$f" ]] || continue
+  process_file "$f"
+done
+
+# 主循环：fswatch 优先，否则 polling
+if command -v fswatch >/dev/null 2>&1; then
+  log "using fswatch (event-driven)"
+  # -0: NUL-terminated paths; 监听整个 inbox 目录
+  while IFS= read -r -d "" path; do
+    # fswatch 的 path 可能是目录或文件；只处理 inbox 下的 .md
+    if [[ "$path" == "$INBOX"/*.md ]]; then
+      process_file "$path"
+    fi
+  done < <(fswatch -0 "$INBOX")
+else
+  log "fswatch not found, falling back to 1s polling. Install: brew install fswatch"
+  while true; do
+    for f in "$INBOX"/*.md; do
+      [[ -f "$f" ]] || continue
+      process_file "$f"
+    done
+    sleep 1
+  done
+fi
