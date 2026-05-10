@@ -42,12 +42,10 @@ if [[ -f "$PREV_PANE_FILE" ]]; then
   fi
   if [[ -n "$PREV_UUID" && "$PREV_UUID" != "$SESSION_UUID" ]]; then
     echo ""
-    echo "WARNING: '$ROLE' was previously registered to a different iTerm session:"
-    echo "  prev: $PREV_UUID"
-    echo "  now:  $SESSION_UUID"
-    echo "Replacing it now — that other pane will be silently orphaned (still running"
-    echo "but no longer receiving ai-collab notifications). If that other pane still"
-    echo "matters, abort with Ctrl-C and run 'ai-pane-unregister $ROLE' from it first."
+    echo "WARNING: '$ROLE' was registered to a different pane. Auto-replacing."
+    echo "  prev session: $PREV_UUID  (will be orphaned — still running, no longer notified)"
+    echo "  new session:  $SESSION_UUID  (this pane)"
+    echo "  to restore the previous pane, just run 'ai-pane-register $ROLE' from it."
     echo ""
   fi
 fi
