@@ -5,7 +5,7 @@ set -euo pipefail
 BIN_DEST="${PINGAGENT_BIN:-$HOME/.local/bin}"
 CONF_DIR="$HOME/.config/ai-collab"
 
-for script in ai-pane-register ai-pane-unregister ai-ping ai-collab-watch; do
+for script in ai-pane-register ai-pane-unregister ai-pane-doctor ai-ping ai-collab-watch; do
   if [[ -e "$BIN_DEST/$script" || -L "$BIN_DEST/$script" ]]; then
     rm -f "$BIN_DEST/$script"
     echo "  removed $BIN_DEST/$script"

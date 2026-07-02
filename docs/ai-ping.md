@@ -6,6 +6,7 @@
 
 ```
 ai-ping <to> [options] [<message-words...>]
+ai-ping doctor
 ```
 
 ## 速查（5 个最常用 pattern）
@@ -25,13 +26,16 @@ ai-ping claude --wait --timeout 600 --file /tmp/q.md
 
 # stdin pipe
 cat req.md | ai-ping claude --kind review-request
+
+# 只读排障自检
+ai-ping doctor
 ```
 
 ## 参数详解
 
 | 参数 | 必需 | 说明 |
 |---|---|---|
-| `<to>` | ✓ | 目标 role，通常是 `claude` 或 `codex` |
+| `<to>` | ✓ | 目标 role，以 `.ai-mailbox/.panes/` 里的实际注册名为准 |
 | `--file <path>` | | 从文件读消息正文。**推荐**：避免 shell 转义，保留代码块/换行 |
 | `--kind <kind>` | | 消息类型，默认 `msg`。完整表见下面 |
 | `--reply-to <id>` | | 这是对某条消息的回复。`<id>` 来自被回复消息的 frontmatter 里 `id:` 字段 |
@@ -71,6 +75,23 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
 
 消息文件 = YAML frontmatter + markdown 正文。frontmatter 至少有 `id` `from` `to` `kind` `created`，回复时还有 `reply_to`。
 
+## mailbox 选择规则
+
+`ai-ping` 会从当前目录向上扫描 `.ai-mailbox/`，但不会盲目使用最近的一套：
+
+1. 默认自动 `--from` 时，优先选择“当前 pane 的 `$ITERM_SESSION_ID` 已注册，且目标 `<to>` 也注册在同一套”的 mailbox
+2. 如果目标还没注册，则选择当前 pane 已注册的那套 mailbox，保留“消息先排队、对方稍后注册”的语义
+3. 显式传 `--from <role>` 时，仍会优先选择当前 session 对应 role 所在的 mailbox；没有 iTerm2 session 时，优先选择 `<from>` 和 `<to>` 都注册过的 mailbox
+4. 只有找不到任何注册匹配时，才退回到最近的 `.ai-mailbox/`
+
+如果当前子目录里有残留或独立的 `.ai-mailbox/`，但当前 pane 实际注册在上层项目，`ai-ping` 会打印 `skipped nearer mailbox` 并把消息写到已注册 session 的那套 mailbox。
+
+如果显式 `--from` 和当前 pane 在选中 mailbox 中注册的 role 不一致，`ai-ping` 会警告：对方按 frontmatter 回复时，回信会进入 `--from` 指定 role 的 inbox，而不是当前 pane 监听的 inbox。
+
+## doctor 诊断
+
+`ai-ping doctor` 是只读自检，不 kill、不删、不写。它会检查向上的 mailbox、当前 iTerm session 注册、watcher pid/orphan 状态、重复/分裂注册、无 watcher 的未派发 inbox、`sent/` 里的伪装 sender 历史、watcher log 注入错误、fswatch、`.gitignore`。全绿 exit 0；任何 WARN/FAIL exit 1。
+
 ## --wait 语义
 
 `ai-ping claude --wait --timeout 600 --file /tmp/q.md`：
@@ -92,9 +113,13 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
 |---|---|---|
 | `Cannot auto-detect --from` | 当前 pane 没注册 / `ITERM_SESSION_ID` 缺失 | 跑 `ai-pane-register <role>` 或显式 `--from <role>` |
 | `No .ai-mailbox/ found upward from ...` | 当前目录不在已 register 过的项目下 | `cd <project>` 或确认 register 跑过 |
+| `<to> must be lowercase...` / `--from must be lowercase...` | role 名不合法 | 只使用小写字母、数字、下划线、短横线 |
+| `Role must be lowercase...` | `ai-pane-unregister <role>` 的 role 名不合法 | 只使用小写字母、数字、下划线、短横线 |
+| `role 'doctor' is reserved` | `doctor` 是 `ai-ping doctor` 保留字 | 换一个 role 名 |
 | `File not found: <path>` | `--file` 路径错 | 用绝对路径或确认文件存在 |
 | `Cannot ping yourself (from=to=...)` | `--from` 和 `<to>` 同一个 role | 检查参数 |
 | `target '<role>' not registered yet` | 对方还没 `ai-pane-register` | 让对方先 register |
+| `target '<role>' is not registered in selected mailbox` | 双方 role 注册到了不同 mailbox | 两个 pane 都 `cd` 到同一项目根目录后重新 `ai-pane-register` |
 | 对方收到但没自动提交（卡输入框） | watcher 还在用旧代码 | `pkill -f ai-collab-watch` 然后重新 `ai-pane-register <role>` |
 | `Timeout after Ns — no reply yet` | `--wait` 等过头了，对方还没回 | 检查对方 pane / 调大 `--timeout` |
 
@@ -106,6 +131,7 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
 4. **kind 决定对方行为**：`pushback` 应让对方停下，`msg` 可能被随手处理。**选对 kind 很重要**
 5. **不要 ai-ping 自己**：脚本直接拒绝 from == to
 6. **`--wait` 不会自动重传**：超时只是不再等，消息已经躺在对方 inbox
+7. **嵌套项目要确认 mailbox**：从子目录执行 `ai-ping` 没问题，但两个 pane 必须注册到同一套 `.ai-mailbox/`；看到 `skipped nearer mailbox` 是正常的自动避让提示
 
 ## 完整示例：一次 review 往返
 

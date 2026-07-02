@@ -13,7 +13,11 @@ if [[ -z "$ROLE" ]]; then
 fi
 
 if [[ ! "$ROLE" =~ ^[a-z0-9_-]+$ ]]; then
-  echo "Role must be lowercase alphanum (got: $ROLE)" >&2
+  echo "Role must be lowercase alphanum, underscore, or dash (got: $ROLE)" >&2
+  exit 1
+fi
+if [[ "$ROLE" == "doctor" ]]; then
+  echo "Role 'doctor' is reserved for 'ai-ping doctor'" >&2
   exit 1
 fi
 
@@ -29,7 +33,34 @@ if [[ -z "$SESSION_UUID" || "$SESSION_UUID" == "$ITERM_SESSION_ID" ]]; then
   exit 1
 fi
 
+find_parent_mailbox() {
+  local dir
+  dir="$(dirname "$PWD")"
+  while [[ "$dir" != "/" && "$dir" != "" ]]; do
+    if [[ -d "$dir/.ai-mailbox" ]]; then
+      printf '%s\n' "$dir/.ai-mailbox"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+  done
+  return 1
+}
+
 MAILBOX="$PWD/.ai-mailbox"
+PARENT_MAILBOX=$(find_parent_mailbox || true)
+if [[ -n "$PARENT_MAILBOX" ]]; then
+  echo "" >&2
+  echo "WARNING: an ancestor mailbox already exists:" >&2
+  echo "  $PARENT_MAILBOX" >&2
+  if [[ -d "$MAILBOX" ]]; then
+    echo "Registering here will use this nested mailbox:" >&2
+  else
+    echo "Registering here will create a separate mailbox:" >&2
+  fi
+  echo "  $MAILBOX" >&2
+  echo "If this pane should join the ancestor collaboration, cd to that project root and run ai-pane-register there." >&2
+  echo "" >&2
+fi
 mkdir -p "$MAILBOX/inbox/$ROLE" "$MAILBOX/sent" "$MAILBOX/.panes"
 
 # 检测是否在覆盖已有的 different-UUID 注册（防止用户没意识到老 pane 被静默 orphan）

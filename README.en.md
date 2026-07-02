@@ -46,14 +46,14 @@ cd PingAgent
 ```
 
 `install.sh` will:
-- Symlink `bin/ai-pane-register`, `bin/ai-pane-unregister`, `bin/ai-ping`, `bin/ai-collab-watch` into `~/.local/bin/`
+- Symlink `bin/ai-pane-register`, `bin/ai-pane-unregister`, `bin/ai-pane-doctor`, `bin/ai-ping`, `bin/ai-collab-watch` into `~/.local/bin/`
 - Symlink `AGENTS.md` to `~/.config/ai-collab/AGENTS-template.md` (so you can copy it into any project from a stable location)
 - Check `$PATH`; suggest `brew install fswatch` if missing
 
 Verify:
 
 ```bash
-which ai-ping ai-pane-register ai-collab-watch
+which ai-ping ai-pane-register ai-pane-doctor ai-collab-watch
 ai-ping --help
 ```
 
@@ -92,7 +92,9 @@ claude
 `ai-pane-register` does three things:
 1. Saves the current pane's `$ITERM_SESSION_ID` UUID into `.ai-mailbox/.panes/<role>.json`
 2. Starts `ai-collab-watch <role>` in the background (log: `.ai-mailbox/.watch-<role>.log`)
-3. Refuses to double-start (skips if PID still alive)
+3. Cleans up any old watcher for the same role+mailbox, then starts a fresh watcher
+
+Run `ai-pane-register` from the project root. If an ancestor directory already has `.ai-mailbox/`, `ai-pane-register` warns that the current command will use or create a nested mailbox; in most cases you should `cd` back to the ancestor project root instead.
 
 **When you're done with a pane** (optional cleanup):
 
@@ -126,6 +128,7 @@ claude should `Read` the file, then reply via `ai-ping codex --reply-to <id> "..
 ```bash
 ai-pane-register <role>                                    # at pane startup
 ai-pane-unregister [<role>]                                # at pane shutdown (optional)
+ai-ping doctor                                             # read-only diagnostics
 ai-ping <to> <message>                                     # one-line message
 ai-ping <to> --file <path>                                 # long content (recommended)
 ai-ping <to> --kind review-request --file ...              # specify kind
@@ -164,6 +167,7 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 - **`sent/` is the audit log**: senders always have a copy
 - **`--wait` defaults to 300 s**: under Claude Code's Bash tool ceiling of 600 s
 - **Watcher is per-cwd**: switching projects requires re-registering (each project has its own mailbox)
+- **Nested mailbox avoidance**: when run from a subdirectory, `ai-ping` / `ai-pane-unregister` prefer the mailbox where the current pane is registered and both roles belong to the same mailbox; they fall back to the nearest `.ai-mailbox/` only when no registration match exists
 - **`--wait` polls (every 2 s)**: not event-driven — sufficient in practice
 - **Watcher cleanup**: `ai-pane-unregister` kills the watcher and its `fswatch` child via `pkill -P`. The watcher itself also installs a `trap` to clean up children on signal
 - **macOS-only**: `osascript` is Apple-specific. Linux would need `tmux send-keys` or similar — PRs welcome
@@ -184,6 +188,18 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 
 **`ai-ping` says `Cannot auto-detect --from`:**
 - You're running it from a pane that was never registered. Either run from a registered pane, or pass `--from <role>` explicitly
+
+**It says `target '<role>' is not registered in selected mailbox`, but another mailbox has that role:**
+- The two panes were likely registered from different project directories. In both panes, `cd` to the same project root and run `ai-pane-register <role>` again
+
+**It says `sending as --from '<role>'`, but this pane is registered as another role:**
+- Replies will go to the `--from` role's inbox, not the inbox watched by this pane. Unless you are intentionally relaying/testing, send as the role registered in this pane
+
+**It says `Role must be lowercase...`:**
+- `ai-pane-unregister <role>` only accepts lowercase letters, digits, underscores, and dashes
+
+**You are unsure whether mailbox / watcher / inbox state is healthy:**
+- Run `ai-ping doctor`. It is read-only and checks nested mailboxes, current pane registration, watchers, blackhole inboxes, spoofed sender history, injection errors, fswatch, and gitignore
 
 **Watcher process won't die after `ai-pane-unregister`:**
 - Nuclear option: `pkill -f ai-collab-watch`

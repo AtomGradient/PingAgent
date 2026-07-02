@@ -27,7 +27,7 @@ done
 mkdir -p "$BIN_DEST" "$CONF_DIR"
 
 # Install scripts
-for script in ai-pane-register ai-pane-unregister ai-ping ai-collab-watch; do
+for script in ai-pane-register ai-pane-unregister ai-pane-doctor ai-ping ai-collab-watch; do
   src="$BIN_SRC/$script"
   dst="$BIN_DEST/$script"
   if [[ ! -f "$src" ]]; then

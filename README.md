@@ -45,14 +45,14 @@ cd PingAgent
 ```
 
 `install.sh` 会：
-- 把 `bin/ai-pane-register`、`bin/ai-ping`、`bin/ai-collab-watch` 链接到 `~/.local/bin/`
+- 把 `bin/ai-pane-register`、`bin/ai-pane-unregister`、`bin/ai-pane-doctor`、`bin/ai-ping`、`bin/ai-collab-watch` 链接到 `~/.local/bin/`
 - 把 `AGENTS.md` 链接到 `~/.config/ai-collab/AGENTS-template.md`（方便从任意目录拷贝到项目里）
 - 检查 PATH，提示装 fswatch（如未装）
 
 确认安装：
 
 ```bash
-which ai-ping ai-pane-register ai-collab-watch
+which ai-ping ai-pane-register ai-pane-doctor ai-collab-watch
 ai-ping --help
 ```
 
@@ -91,7 +91,9 @@ claude               # 启动 Claude Code
 `ai-pane-register` 做三件事：
 1. 把当前 pane 的 `$ITERM_SESSION_ID` UUID 存到 `.ai-mailbox/.panes/<role>.json`
 2. 启动 `ai-collab-watch <role>` 后台进程（log 在 `.ai-mailbox/.watch-<role>.log`）
-3. 检测重复启动（PID 还活就不重起）
+3. 清理同一 role+mailbox 的旧 watcher，再启动新的 watcher
+
+建议在项目根目录执行 `ai-pane-register`。如果当前目录的上层已经有 `.ai-mailbox/`，`ai-pane-register` 会提示你正在使用或创建一套嵌套 mailbox；这通常意味着你应该先 `cd` 回上层项目根目录。
 
 **关闭 pane 之前**（可选清理）：
 
@@ -123,6 +125,7 @@ claude 应该 Read 那个文件、然后用 `ai-ping codex --reply-to <id> "..."
 ```bash
 ai-pane-register <role>                                    # 在每个 pane 启动时跑一次
 ai-pane-unregister [<role>]                                # 关闭 pane 时清理（可选）
+ai-ping doctor                                             # 只读排障自检
 ai-ping <to> <message>                                     # 简单消息
 ai-ping <to> --file <path>                                 # 长内容（推荐）
 ai-ping <to> --kind review-request --file ...              # 指定 kind
@@ -161,6 +164,7 @@ echo "..." | ai-ping <to>                                  # stdin
 - **`sent/` 是 audit log**：发件人那边永远有副本，方便追溯
 - **`--wait` 默认 300s**：低于 Claude Code Bash tool 上限 600s，避免误超时
 - **watcher 是 per-cwd 的**：换项目要重新 register（每个项目独立 mailbox）
+- **嵌套 mailbox 自动避让**：`ai-ping` / `ai-pane-unregister` 从子目录执行时，会优先选择当前 pane 注册过、且双方 role 在同一套里的 mailbox；只有找不到注册匹配时才退回到最近的 `.ai-mailbox/`
 - **`--wait` 是轮询不是事件**（2s 一次）：要事件级可改成 socket-based，目前没需要
 - **macOS only**：osascript 是 macOS 特有；Linux 要换成 tmux send-keys 之类，欢迎 PR
 
@@ -180,6 +184,18 @@ echo "..." | ai-ping <to>                                  # stdin
 
 **`ai-ping` 提示 `Cannot auto-detect --from`**：
 - 你不在已注册的 pane 里。要么去注册过的 pane 里跑，要么 `ai-ping ... --from <role>` 显式传
+
+**提示 `target '<role>' is not registered in selected mailbox`，但又说另一个 mailbox 里注册了该 role**：
+- 两个 pane 很可能注册到了不同项目目录。分别在两个 pane 里 `cd` 到同一个项目根目录，重新执行 `ai-pane-register <role>`
+
+**提示 `sending as --from '<role>'`，但当前 pane 注册成另一个 role**：
+- 回信会进入 `--from` 指定 role 的 inbox，不会进入当前 pane 正在监听的 inbox。除非你在做 relay/测试，否则去当前 pane 注册的 role 下发送
+
+**提示 `Role must be lowercase...`**：
+- `ai-pane-unregister <role>` 的 role 只能包含小写字母、数字、下划线、短横线
+
+**不确定 mailbox / watcher / inbox 状态是否正常**：
+- 跑 `ai-ping doctor`。它只读检查嵌套 mailbox、当前 pane 注册、watcher、黑洞 inbox、伪装发送历史、注入错误、fswatch、gitignore
 
 ## 协议说明（给 AI 看）
 
