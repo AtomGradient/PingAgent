@@ -276,7 +276,7 @@ for ((i = 0; i < MAILBOX_COUNT; i++)); do
   done
 done
 if [[ -n "$log_hits" ]]; then
-  print_result WARN "7 watcher log tail" "recent inject/session errors in: $log_hits" "re-run ai-pane-register <role>; if it persists, check iTerm2 session and macOS Accessibility permission"
+  print_result WARN "7 watcher log tail" "recent inject/session errors in: $log_hits" "re-run ai-pane-register <role>; if it persists, check iTerm2 session and macOS Automation permission"
 else
   print_result OK "7 watcher log tail" "no recent inject failed/session not found entries" "none"
 fi

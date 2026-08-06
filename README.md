@@ -159,7 +159,8 @@ echo "..." | ai-ping <to>                                  # stdin
 ## 设计选择 / 已知限制
 
 - **通知内容只放路径不放正文**：避免 osascript 转义/换行问题，AI 自己 Read 文件读全文
-- **`.dispatched` sidecar 去重**：watcher 重启不会重发同一条消息；用文件而非内存，bash 3.2 也跑
+- **`.dispatched` sidecar 去重**：只有 osascript 返回明确的 `ok` 后才创建；`session not found`、Automation `-1743` 或未知返回都保持未派发
+- **sidecar 不是消费回执**：它只表示 iTerm2 接受了注入；AI 是否读取、处理仍以 peer 回复或显式 receipt 为准。升级前留下的空 sidecar 不能追溯证明真实送达
 - **atomic write**：`mktemp + mv`，watcher 不会读到半截写入的文件
 - **`sent/` 是 audit log**：发件人那边永远有副本，方便追溯
 - **`--wait` 默认 300s**：低于 Claude Code Bash tool 上限 600s，避免误超时
@@ -174,13 +175,13 @@ echo "..." | ai-ping <to>                                  # stdin
 - 检查 `.ai-mailbox/.watch-<role>.log` 里有没有 `dispatching` 这一行
 - `ps aux | grep ai-collab-watch` 看 watcher 进程是否还活着
 - 若 watcher 死了：再跑一次 `ai-pane-register <role>`
-- 若 watcher 活着但没注入：osascript 可能被 macOS 安全策略拦了，给 iTerm2 加 Accessibility 权限
+- 若 watcher 活着但没注入：看日志里的 `reason=`；`automation_denied_-1743` 表示 macOS Automation 权限拒绝，应在系统隐私设置中检查发送 Apple Events 的宿主权限
 
 **`session not found`**：
-- iTerm2 重启或换 pane 后 UUID 失效。重跑 `ai-pane-register <role>`
+- iTerm2 重启或换 pane 后 UUID 失效。消息不会写 `.dispatched`；在新 pane 重跑 `ai-pane-register <role>` 后会重新尝试
 
 **消息被重复触发**：
-- 通常是因为 `.dispatched` sidecar 没建（watcher 第一次跑挂了）。`rm .ai-mailbox/inbox/<role>/*.dispatched` 后只保留你想重发的那条
+- 先看 watcher 日志。失败投递不会创建 `.dispatched`；没有 fswatch、使用轮询回退时会继续尝试。不要为“修复”而批量删除已有 sidecar，只对已确认需要重发的单条消息操作
 
 **`ai-ping` 提示 `Cannot auto-detect --from`**：
 - 你不在已注册的 pane 里。要么去注册过的 pane 里跑，要么 `ai-ping ... --from <role>` 显式传
@@ -196,6 +197,14 @@ echo "..." | ai-ping <to>                                  # stdin
 
 **不确定 mailbox / watcher / inbox 状态是否正常**：
 - 跑 `ai-ping doctor`。它只读检查嵌套 mailbox、当前 pane 注册、watcher、黑洞 inbox、伪装发送历史、注入错误、fswatch、gitignore
+
+## 测试
+
+```bash
+./tests/test-ai-collab-watch.sh
+```
+
+回归覆盖正常注入、session 缺失、Automation `-1743`、升级前 sidecar 去重，以及未知成功输出的 fail-closed 行为。测试使用本地 osascript/fswatch test double，不会向真实 iTerm2 session 注入文本。
 
 ## 协议说明（给 AI 看）
 

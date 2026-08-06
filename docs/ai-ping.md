@@ -92,6 +92,12 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
 
 `ai-ping doctor` 是只读自检，不 kill、不删、不写。它会检查向上的 mailbox、当前 iTerm session 注册、watcher pid/orphan 状态、重复/分裂注册、无 watcher 的未派发 inbox、`sent/` 里的伪装 sender 历史、watcher log 注入错误、fswatch、`.gitignore`。全绿 exit 0；任何 WARN/FAIL exit 1。
 
+## delivery 与 `.dispatched` 语义
+
+watcher 只有在 osascript 以 0 退出且返回精确 `ok` 时才写 `<msg>.md.dispatched`。`session not found` 会分类为 `session_not_found`，Apple Event `-1743` 会分类为 `automation_denied_-1743`；二者以及其他未知返回都不写 sidecar，日志明确保留 `message remains undispatched`。
+
+`.dispatched` 只是 legacy 注入去重标记，不是 AI 消费回执。AI 是否读取和完成处理必须由带 `reply_to` 的 peer 回复或更高层显式 receipt 证明；旧版本留下的空 sidecar 也不能追溯证明曾经真实注入。
+
 ## --wait 语义
 
 `ai-ping claude --wait --timeout 600 --file /tmp/q.md`：
@@ -126,7 +132,7 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
 ## 常见误区
 
 1. **正文别放命令行参数里**：除非真是一句话。带特殊字符、代码块、换行的内容 **永远用 `--file`**
-2. **每条消息只发一次**：watcher 用 `.dispatched` sidecar 去重；重跑 ai-ping 会生成新 msg_id，不是覆盖。要真重发，删 sidecar
+2. **每条消息只发一次**：watcher 只为已确认注入的消息写 `.dispatched` 并据此去重；重跑 ai-ping 会生成新 msg_id，不是覆盖。只对已确认需要重发的单条消息处理 sidecar，禁止不加判断地批量删除
 3. **`--reply-to` 决定能不能闭环**：发起方 `--wait` 严格匹配 `reply_to == 自己的 msg_id`；不带 reply_to 的消息只是新一条而已
 4. **kind 决定对方行为**：`pushback` 应让对方停下，`msg` 可能被随手处理。**选对 kind 很重要**
 5. **不要 ai-ping 自己**：脚本直接拒绝 from == to
@@ -196,4 +202,4 @@ ai-ping codex --kind review-response --reply-to 20260511-153000-abc123 --file /t
 └── .watch-claude.log
 ```
 
-调试时最有用的两个文件：`.watch-<role>.log`（看 watcher dispatch 是否 ok）+ `inbox/<role>/<id>.md`（看消息内容是否对）。
+调试时最有用的两个文件：`.watch-<role>.log`（看 `delivery confirmed` 或分类后的 `reason=`）+ `inbox/<role>/<id>.md`（看消息内容是否对）。运行 `./tests/test-ai-collab-watch.sh` 可验证 delivery failure-path，不会触碰真实 iTerm2 session。

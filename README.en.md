@@ -162,7 +162,8 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 ## Design choices / known limitations
 
 - **Notifications are pointers, not content**: avoids osascript escaping/wrapping issues; AI reads the full message itself
-- **`.dispatched` sidecar dedup**: watcher restarts won't redispatch — file-based state, bash 3.2 compatible
+- **`.dispatched` sidecar dedup**: created only after osascript explicitly returns `ok`; `session not found`, Automation `-1743`, and unknown responses remain undispatched
+- **A sidecar is not a consumption receipt**: it only means iTerm2 accepted the injection. Use a peer reply or explicit receipt to prove that the AI read and handled it. Empty sidecars created by older versions cannot retroactively prove delivery
 - **Atomic write**: `mktemp + mv`, watcher never sees half-written files
 - **`sent/` is the audit log**: senders always have a copy
 - **`--wait` defaults to 300 s**: under Claude Code's Bash tool ceiling of 600 s
@@ -178,13 +179,13 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 - Check `.ai-mailbox/.watch-<role>.log` for `dispatching` lines
 - `ps aux | grep ai-collab-watch` — is the watcher alive?
 - If the watcher died: re-run `ai-pane-register <role>`
-- If it's running but not injecting: macOS may have blocked osascript. Grant iTerm2 Accessibility permission in **System Settings → Privacy & Security → Accessibility**
+- If it is running but not injecting, inspect the log's `reason=` value. `automation_denied_-1743` means macOS denied Automation access; check the Apple Events sender's permission in System Settings
 
 **`session not found`**:
-- iTerm2 was restarted, or the pane changed. Re-run `ai-pane-register <role>` in the new pane
+- iTerm2 was restarted, or the pane changed. No `.dispatched` sidecar is written; re-run `ai-pane-register <role>` in the new pane to retry
 
 **A message gets re-dispatched repeatedly:**
-- Usually the `.dispatched` sidecar wasn't created (watcher crashed on its first attempt). `rm .ai-mailbox/inbox/<role>/*.dispatched` keeping only the one you want resent
+- Inspect the watcher log first. Failed delivery intentionally leaves no `.dispatched` sidecar; the polling fallback (when fswatch is unavailable) will retry. Do not bulk-delete existing sidecars—operate only on a message you have confirmed should be resent
 
 **`ai-ping` says `Cannot auto-detect --from`:**
 - You're running it from a pane that was never registered. Either run from a registered pane, or pass `--from <role>` explicitly
@@ -203,6 +204,14 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 
 **Watcher process won't die after `ai-pane-unregister`:**
 - Nuclear option: `pkill -f ai-collab-watch`
+
+## Tests
+
+```bash
+./tests/test-ai-collab-watch.sh
+```
+
+The regression suite covers successful injection, a missing session, Automation `-1743`, pre-upgrade sidecar deduplication, and fail-closed handling of an unknown successful response. It uses local osascript/fswatch test doubles and never injects text into a real iTerm2 session.
 
 ## Protocol doc (for the AIs)
 
