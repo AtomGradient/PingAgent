@@ -46,14 +46,14 @@ cd PingAgent
 ```
 
 `install.sh` will:
-- Symlink `bin/ai-pane-register`, `bin/ai-pane-unregister`, `bin/ai-pane-doctor`, `bin/ai-ping`, `bin/ai-collab-watch` into `~/.local/bin/`
+- Symlink `bin/ai-pane-register`, `bin/ai-pane-unregister`, `bin/ai-pane-doctor`, `bin/ai-ping`, `bin/ai-collab-watch`, `bin/ai-harness-transport` into `~/.local/bin/`
 - Symlink `AGENTS.md` to `~/.config/ai-collab/AGENTS-template.md` (so you can copy it into any project from a stable location)
 - Check `$PATH`; suggest `brew install fswatch` if missing
 
 Verify:
 
 ```bash
-which ai-ping ai-pane-register ai-pane-doctor ai-collab-watch
+which ai-ping ai-pane-register ai-pane-doctor ai-collab-watch ai-harness-transport
 ai-ping --help
 ```
 
@@ -164,6 +164,7 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 - **Notifications are pointers, not content**: avoids osascript escaping/wrapping issues; AI reads the full message itself
 - **`.dispatched` sidecar dedup**: created only after osascript explicitly returns `ok`; `session not found`, Automation `-1743`, and unknown responses remain undispatched
 - **A sidecar is not a consumption receipt**: it only means iTerm2 accepted the injection. Use a peer reply or explicit receipt to prove that the AI read and handled it. Empty sidecars created by older versions cannot retroactively prove delivery
+- **Harness typed transport**: `ai-harness-transport` accepts only an exact iTerm session already resolved and fenced by Harness. It does not resolve roles, choose a mailbox, or write `.dispatched`; it returns redacted structured transport evidence only after exact-session injection returns `ok`. Harness Host still validates policy routing, delivery ACK, and consumption ACK.
 - **Atomic write**: `mktemp + mv`, watcher never sees half-written files
 - **`sent/` is the audit log**: senders always have a copy
 - **`--wait` defaults to 300 s**: under Claude Code's Bash tool ceiling of 600 s

@@ -45,14 +45,14 @@ cd PingAgent
 ```
 
 `install.sh` 会：
-- 把 `bin/ai-pane-register`、`bin/ai-pane-unregister`、`bin/ai-pane-doctor`、`bin/ai-ping`、`bin/ai-collab-watch` 链接到 `~/.local/bin/`
+- 把 `bin/ai-pane-register`、`bin/ai-pane-unregister`、`bin/ai-pane-doctor`、`bin/ai-ping`、`bin/ai-collab-watch`、`bin/ai-harness-transport` 链接到 `~/.local/bin/`
 - 把 `AGENTS.md` 链接到 `~/.config/ai-collab/AGENTS-template.md`（方便从任意目录拷贝到项目里）
 - 检查 PATH，提示装 fswatch（如未装）
 
 确认安装：
 
 ```bash
-which ai-ping ai-pane-register ai-pane-doctor ai-collab-watch
+which ai-ping ai-pane-register ai-pane-doctor ai-collab-watch ai-harness-transport
 ai-ping --help
 ```
 
@@ -161,6 +161,7 @@ echo "..." | ai-ping <to>                                  # stdin
 - **通知内容只放路径不放正文**：避免 osascript 转义/换行问题，AI 自己 Read 文件读全文
 - **`.dispatched` sidecar 去重**：只有 osascript 返回明确的 `ok` 后才创建；`session not found`、Automation `-1743` 或未知返回都保持未派发
 - **sidecar 不是消费回执**：它只表示 iTerm2 接受了注入；AI 是否读取、处理仍以 peer 回复或显式 receipt 为准。升级前留下的空 sidecar 不能追溯证明真实送达
+- **Harness typed transport**：`ai-harness-transport` 只接受 Harness 已解析并 fencing 的 exact iTerm session，不解析 role、不选择 mailbox、不写 `.dispatched`。它只在 exact session 注入得到明确 `ok` 后返回结构化、去除 raw session 的 transport evidence；policy route、delivery ACK 与 consumption ACK 仍由 Harness Host 验证。
 - **atomic write**：`mktemp + mv`，watcher 不会读到半截写入的文件
 - **`sent/` 是 audit log**：发件人那边永远有副本，方便追溯
 - **`--wait` 默认 300s**：低于 Claude Code Bash tool 上限 600s，避免误超时
