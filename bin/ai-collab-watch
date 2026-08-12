@@ -27,10 +27,18 @@ fi
 
 INBOX="$MAILBOX/inbox/$ROLE"
 mkdir -p "$INBOX"
+PID_FILE="$MAILBOX/.watch-$ROLE.pid"
+printf '%s\n' "$$" > "$PID_FILE"
 
 # 收到信号时把 fswatch 等子进程一起带走（避免孤儿）。
-# 不 trap HUP：让 nohup 启动的 watcher 在父 shell 退出时正常存活。
-trap 'pkill -P $$ 2>/dev/null || true' EXIT TERM INT
+# 不 trap HUP；生命周期由独立 OS session / ai-watch-service 管理。
+cleanup() {
+  pkill -P $$ 2>/dev/null || true
+  if [[ -f "$PID_FILE" ]] && [[ "$(cat "$PID_FILE" 2>/dev/null || true)" == "$$" ]]; then
+    rm -f "$PID_FILE"
+  fi
+}
+trap cleanup EXIT TERM INT
 
 log() {
   echo "[$(date "+%Y-%m-%d %H:%M:%S")] $*"
@@ -48,7 +56,9 @@ log() {
 #    分两次发使第二次 write 不会被裹进同一个 paste，CR 作为独立字节流到达就当 Enter。
 inject() {
   local msg="$1"
-  /usr/bin/osascript \
+  local result osascript_bin
+  osascript_bin="${AI_COLLAB_OSASCRIPT:-/usr/bin/osascript}"
+  if ! result=$("$osascript_bin" \
     -e '
 on run argv
   set targetID to item 1 of argv
@@ -73,7 +83,15 @@ on run argv
   end tell
 end run
 ' \
-    -- "$SESSION_UUID" "$msg" 2>&1
+    -- "$SESSION_UUID" "$msg" 2>&1); then
+    printf '%s\n' "$result" >&2
+    return 1
+  fi
+  if [[ "$result" != "ok" ]]; then
+    printf '%s\n' "$result" >&2
+    return 1
+  fi
+  printf '%s\n' "$result"
 }
 
 # 解析 frontmatter 字段
@@ -99,8 +117,10 @@ process_file() {
     return 0
   fi
 
-  # 抢占式标记：先 touch sidecar，再 inject。即使 inject 失败也不会重复触发。
-  touch "${path}.dispatched" 2>/dev/null || return 0
+  # 原子目录锁避免两个 watcher 同时投递。只有 inject 成功后才写 dispatched；
+  # session 失效或 osascript 失败时消息保持 pending，不能静默丢失。
+  local dispatch_lock="${path}.dispatching"
+  mkdir "$dispatch_lock" 2>/dev/null || return 0
 
   local sender kind id reply_to
   sender=$(extract_field "$path" from)
@@ -122,9 +142,12 @@ process_file() {
   fi
 
   log "dispatching: $fname (from=$sender, kind=$kind)"
-  if ! inject "$notif"; then
+  if inject "$notif"; then
+    touch "${path}.dispatched"
+  else
     log "WARNING: inject failed for $fname"
   fi
+  rmdir "$dispatch_lock" 2>/dev/null || true
 }
 
 log "ai-collab-watch starting: role=$ROLE mailbox=$MAILBOX session=$SESSION_UUID"

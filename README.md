@@ -90,8 +90,8 @@ claude               # 启动 Claude Code
 
 `ai-pane-register` 做三件事：
 1. 把当前 pane 的 `$ITERM_SESSION_ID` UUID 存到 `.ai-mailbox/.panes/<role>.json`
-2. 启动 `ai-collab-watch <role>` 后台进程（log 在 `.ai-mailbox/.watch-<role>.log`）
-3. 检测重复启动（PID 还活就不重起）
+2. 在独立 OS session 中启动 `ai-collab-watch <role>`（log 在 `.ai-mailbox/.watch-<role>.log`）
+3. 幂等替换同一 role + mailbox 的旧 watcher，避免孤儿进程
 
 **关闭 pane 之前**（可选清理）：
 
@@ -100,7 +100,7 @@ ai-pane-unregister           # 从当前 pane 的 session id 自动反查 role
 ai-pane-unregister codex     # 也可以显式传
 ```
 
-会做三件事：杀掉 watcher（连同子进程 fswatch）、清掉 PID 文件、删掉 `.panes/<role>.json`。inbox/sent/dispatched 历史不动。忘了跑也没关系——下次 `ai-pane-register` 会复用同一个 role slot。
+会做三件事：停止 watcher、清掉 PID 文件、删掉 `.panes/<role>.json`。inbox/sent/dispatched 历史不动。忘了跑也没关系——下次 `ai-pane-register` 会复用同一个 role slot。
 
 ### 验证
 
@@ -161,6 +161,8 @@ echo "..." | ai-ping <to>                                  # stdin
 - **`sent/` 是 audit log**：发件人那边永远有副本，方便追溯
 - **`--wait` 默认 300s**：低于 Claude Code Bash tool 上限 600s，避免误超时
 - **watcher 是 per-cwd 的**：换项目要重新 register（每个项目独立 mailbox）
+- **watcher 独立于调用 shell**：即使 `ai-pane-register` 从短生命周期的 AI tool shell 调用，注册命令退出后 watcher 仍存活；`ai-ping` 发现目标 watcher 不在时会自动拉起
+- **投递有确认**：只有 osascript 成功找到目标 session 后才写 `.dispatched`；`ai-ping` 未在 4 秒内看到确认会明确告警，不再把“写入邮箱”冒充成“pane 已通知”
 - **`--wait` 是轮询不是事件**（2s 一次）：要事件级可改成 socket-based，目前没需要
 - **macOS only**：osascript 是 macOS 特有；Linux 要换成 tmux send-keys 之类，欢迎 PR
 
@@ -170,6 +172,7 @@ echo "..." | ai-ping <to>                                  # stdin
 - 检查 `.ai-mailbox/.watch-<role>.log` 里有没有 `dispatching` 这一行
 - `ps aux | grep ai-collab-watch` 看 watcher 进程是否还活着
 - 若 watcher 死了：再跑一次 `ai-pane-register <role>`
+- 新版 `ai-ping` 会在发信时自动拉起已注册但停止的 watcher；仍未出现 `notification: dispatched` 时按日志提示重新注册 pane
 - 若 watcher 活着但没注入：osascript 可能被 macOS 安全策略拦了，给 iTerm2 加 Accessibility 权限
 
 **`session not found`**：

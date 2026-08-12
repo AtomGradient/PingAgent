@@ -91,8 +91,8 @@ claude
 
 `ai-pane-register` does three things:
 1. Saves the current pane's `$ITERM_SESSION_ID` UUID into `.ai-mailbox/.panes/<role>.json`
-2. Starts `ai-collab-watch <role>` in the background (log: `.ai-mailbox/.watch-<role>.log`)
-3. Refuses to double-start (skips if PID still alive)
+2. Starts `ai-collab-watch <role>` in a detached OS session (log: `.ai-mailbox/.watch-<role>.log`)
+3. Idempotently replaces the old watcher for the same role and mailbox
 
 **When you're done with a pane** (optional cleanup):
 
@@ -101,7 +101,7 @@ ai-pane-unregister           # auto-detects role from current pane
 ai-pane-unregister codex     # or pass explicitly
 ```
 
-It does three things: kills the watcher (and its `fswatch` child), removes the PID file, deletes `.panes/<role>.json`. Inbox/sent/dispatched history is preserved. If you forget to run it, the next `ai-pane-register` will reuse the slot.
+It does three things: stops the watcher, removes the PID file, and deletes `.panes/<role>.json`. Inbox/sent/dispatched history is preserved. If you forget to run it, the next `ai-pane-register` will reuse the slot.
 
 ### Verify
 
@@ -164,6 +164,8 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 - **`sent/` is the audit log**: senders always have a copy
 - **`--wait` defaults to 300 s**: under Claude Code's Bash tool ceiling of 600 s
 - **Watcher is per-cwd**: switching projects requires re-registering (each project has its own mailbox)
+- **Detached watcher session**: a watcher survives even when `ai-pane-register` was invoked from a short-lived AI tool shell; `ai-ping` automatically restarts a stopped watcher for a registered target
+- **Delivery confirmation**: `.dispatched` is written only after osascript finds the target session; if confirmation does not arrive within four seconds, `ai-ping` warns instead of treating a queued file as a pane notification
 - **`--wait` polls (every 2 s)**: not event-driven — sufficient in practice
 - **Watcher cleanup**: `ai-pane-unregister` kills the watcher and its `fswatch` child via `pkill -P`. The watcher itself also installs a `trap` to clean up children on signal
 - **macOS-only**: `osascript` is Apple-specific. Linux would need `tmux send-keys` or similar — PRs welcome
@@ -174,6 +176,7 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 - Check `.ai-mailbox/.watch-<role>.log` for `dispatching` lines
 - `ps aux | grep ai-collab-watch` — is the watcher alive?
 - If the watcher died: re-run `ai-pane-register <role>`
+- Current `ai-ping` automatically restarts a stopped watcher for a registered target; if `notification: dispatched` is still absent, follow the log hint and re-register the pane
 - If it's running but not injecting: macOS may have blocked osascript. Grant iTerm2 Accessibility permission in **System Settings → Privacy & Security → Accessibility**
 
 **`session not found`**:

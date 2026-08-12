@@ -157,6 +157,35 @@ cp "$TARGET_FILE" "$MAILBOX/sent/${MSG_ID}.md"
 echo "Sent: $MSG_ID  ($FROM -> $TO, kind=$KIND${REPLY_TO:+, reply_to=$REPLY_TO})"
 echo "  $TARGET_FILE"
 
+# 注册文件存在却没有 watcher 时自动修复。watcher 在独立 OS session 中运行，不会随
+# 当前 ai-ping/tool shell 退出。随后等待 dispatched，避免“写入邮箱”被误报为
+# “pane 已通知”；session 失效或注入失败会保留 pending 并明确告警。
+if [[ -f "$MAILBOX/.panes/$TO.json" ]]; then
+  if ! ai-watch-service status "$TO" "$MAILBOX" >/dev/null 2>&1; then
+    echo "Watcher for '$TO' is not running; attempting detached recovery..." >&2
+    if ! ai-watch-service start "$TO" "$MAILBOX" >&2; then
+      echo "WARNING: message queued, but watcher recovery failed." >&2
+    fi
+  fi
+
+  DISPATCH_CONFIRMED=false
+  ATTEMPT=0
+  while (( ATTEMPT < 40 )); do
+    if [[ -f "${TARGET_FILE}.dispatched" ]]; then
+      DISPATCH_CONFIRMED=true
+      break
+    fi
+    sleep 0.1
+    ATTEMPT=$((ATTEMPT + 1))
+  done
+  if $DISPATCH_CONFIRMED; then
+    echo "  notification: dispatched to registered pane"
+  else
+    echo "WARNING: message is queued but pane notification was not confirmed." >&2
+    echo "  Check $MAILBOX/.watch-$TO.log and re-register '$TO' if its iTerm session changed." >&2
+  fi
+fi
+
 # --wait: 轮询自己 inbox 找 reply_to=$MSG_ID 的回复
 if $WAIT; then
   echo "Waiting for reply to $MSG_ID (timeout ${TIMEOUT}s)..."

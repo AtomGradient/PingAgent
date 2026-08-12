@@ -48,38 +48,17 @@ if [[ -z "$ROLE" ]]; then
   echo "Auto-detected role: $ROLE"
 fi
 
-PID_FILE="$MAILBOX/.watch-$ROLE.pid"
 PANE_FILE="$MAILBOX/.panes/$ROLE.json"
 
 did_anything=false
 
-# 1. Kill watcher via PID file（连同子进程 fswatch）
-if [[ -f "$PID_FILE" ]]; then
-  did_anything=true
-  PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
-    # 先杀子进程（fswatch），再杀父
-    pkill -P "$PID" 2>/dev/null || true
-    kill "$PID" 2>/dev/null || true
-    sleep 0.3
-    if kill -0 "$PID" 2>/dev/null; then
-      kill -9 "$PID" 2>/dev/null || true
-      pkill -9 -P "$PID" 2>/dev/null || true
-    fi
-    echo "Stopped watcher (pid $PID)"
-  else
-    echo "Watcher PID file stale (pid $PID not running) — cleaning"
-  fi
-  rm -f "$PID_FILE"
-fi
-
-# 2. 兜底：杀任何匹配 cmdline 的孤儿 watcher
-if pkill -f "ai-collab-watch $ROLE $MAILBOX" 2>/dev/null; then
-  echo "Killed orphan watcher(s) matching 'ai-collab-watch $ROLE $MAILBOX'"
+if ai-watch-service status "$ROLE" "$MAILBOX" >/dev/null 2>&1 || \
+   [[ -f "$MAILBOX/.watch-$ROLE.pid" ]]; then
   did_anything=true
 fi
+ai-watch-service stop "$ROLE" "$MAILBOX"
 
-# 3. 删 pane 注册
+# 删 pane 注册
 if [[ -f "$PANE_FILE" ]]; then
   rm -f "$PANE_FILE"
   echo "Removed $PANE_FILE"

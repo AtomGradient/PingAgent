@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# ai-watch-service <start|restart|stop|status> <role> <mailbox-dir>
+# Internal helper: start the watcher in a detached OS session so callers started
+# from short-lived tool shells cannot accidentally orphan notification delivery.
+set -euo pipefail
+
+ACTION="${1:-}"
+ROLE="${2:-}"
+MAILBOX="${3:-}"
+
+if [[ -z "$ACTION" || -z "$ROLE" || -z "$MAILBOX" ]]; then
+  echo "Usage: ai-watch-service <start|restart|stop|status> <role> <mailbox-dir>" >&2
+  exit 2
+fi
+if [[ ! "$ROLE" =~ ^[a-z0-9_-]+$ ]]; then
+  echo "Invalid role: $ROLE" >&2
+  exit 2
+fi
+
+PID_FILE="$MAILBOX/.watch-$ROLE.pid"
+WATCH_LOG="$MAILBOX/.watch-$ROLE.log"
+WATCH_PATTERN="ai-collab-watch $ROLE $MAILBOX"
+
+watcher_pid() {
+  [[ -f "$PID_FILE" ]] || return 1
+  local pid
+  pid=$(cat "$PID_FILE" 2>/dev/null || true)
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  ps -ww -p "$pid" -o command= 2>/dev/null | grep -Fq "$WATCH_PATTERN"
+  printf '%s\n' "$pid"
+}
+
+watcher_status() {
+  local pid
+  pid=$(watcher_pid) || return 1
+  printf 'running pid=%s mode=detached-session\n' "$pid"
+}
+
+stop_watcher() {
+  local pid
+  if pid=$(watcher_pid); then
+    pkill -P "$pid" 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+  fi
+  pkill -f "$WATCH_PATTERN" 2>/dev/null || true
+  pkill -f "fswatch.*$MAILBOX/inbox/$ROLE" 2>/dev/null || true
+  sleep 0.2
+  pkill -9 -f "$WATCH_PATTERN" 2>/dev/null || true
+  pkill -9 -f "fswatch.*$MAILBOX/inbox/$ROLE" 2>/dev/null || true
+  rm -f "$PID_FILE"
+}
+
+start_watcher() {
+  local watcher_bin pid attempt launcher_pid
+  mkdir -p "$MAILBOX/inbox/$ROLE" "$MAILBOX/.panes"
+  watcher_bin=$(command -v ai-collab-watch 2>/dev/null || true)
+  if [[ -z "$watcher_bin" ]]; then
+    echo "ai-collab-watch not found in PATH" >&2
+    return 1
+  fi
+
+  rm -f "$PID_FILE"
+  if command -v python3 >/dev/null 2>&1; then
+    launcher_pid=$(python3 - "$watcher_bin" "$ROLE" "$MAILBOX" "$WATCH_LOG" <<'PY'
+import subprocess
+import sys
+
+watcher, role, mailbox, log_path = sys.argv[1:]
+with open(log_path, "ab", buffering=0) as log:
+    child = subprocess.Popen(
+        [watcher, role, mailbox],
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+print(child.pid)
+PY
+)
+  elif command -v perl >/dev/null 2>&1; then
+    launcher_pid=$(perl -MPOSIX=setsid -e '
+      my ($log_path, @cmd) = @ARGV;
+      my $pid = fork();
+      die "fork failed: $!" unless defined $pid;
+      if ($pid) { print "$pid\n"; exit 0; }
+      setsid() or die "setsid failed: $!";
+      open STDIN, "<", "/dev/null" or die $!;
+      open STDOUT, ">>", $log_path or die $!;
+      open STDERR, ">&STDOUT" or die $!;
+      exec @cmd or die "exec failed: $!";
+    ' "$WATCH_LOG" "$watcher_bin" "$ROLE" "$MAILBOX")
+  else
+    echo "Starting a detached watcher requires python3 or perl" >&2
+    return 1
+  fi
+
+  attempt=0
+  while (( attempt < 30 )); do
+    if pid=$(watcher_pid); then
+      printf 'Watcher started (pid %s, detached session, log %s)\n' "$pid" "$WATCH_LOG"
+      return 0
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  echo "Watcher failed to start (launcher pid $launcher_pid). See $WATCH_LOG" >&2
+  return 1
+}
+
+case "$ACTION" in
+  status)
+    watcher_status
+    ;;
+  stop)
+    stop_watcher
+    ;;
+  start)
+    if watcher_status >/dev/null 2>&1; then
+      watcher_status
+    else
+      stop_watcher
+      start_watcher
+    fi
+    ;;
+  restart)
+    stop_watcher
+    start_watcher
+    ;;
+  *)
+    echo "Unknown action: $ACTION" >&2
+    exit 2
+    ;;
+esac

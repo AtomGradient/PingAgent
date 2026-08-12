@@ -64,42 +64,9 @@ EOF
 echo "Registered '$ROLE' -> session $SESSION_UUID"
 echo "  mailbox: $MAILBOX"
 
-# 启动 watcher：每次 register 都做幂等 reset，避免 orphan watcher 累积。
-# nohup 之后 watcher 会被 reparent 到 init，单纯 kill PID 文件里那个 pid 不够，
-# 必须按 cmdline 把同一 role+mailbox 的所有进程一并清掉。
-WATCH_PID_FILE="$MAILBOX/.watch-$ROLE.pid"
-WATCH_LOG="$MAILBOX/.watch-$ROLE.log"
-WATCH_CMD_PATTERN="ai-collab-watch $ROLE $MAILBOX"
-
-# pgrep 找不到匹配会 exit 1，配合 set -e + pipefail 会让整个脚本静默退出。
-# 因此显式吞掉 non-zero。
-EXISTING=$(pgrep -f "$WATCH_CMD_PATTERN" 2>/dev/null || true)
-if [[ -n "$EXISTING" ]]; then
-  echo "Killing existing watcher(s) for $ROLE: $(echo "$EXISTING" | tr '\n' ' ')"
-  pkill -f "$WATCH_CMD_PATTERN" 2>/dev/null || true
-  pkill -f "fswatch.*$MAILBOX/inbox/$ROLE" 2>/dev/null || true
-  sleep 0.3
-  pkill -9 -f "$WATCH_CMD_PATTERN" 2>/dev/null || true
-  pkill -9 -f "fswatch.*$MAILBOX/inbox/$ROLE" 2>/dev/null || true
-  sleep 0.2
-fi
-rm -f "$WATCH_PID_FILE"
-
-# 起新 watcher
-nohup ai-collab-watch "$ROLE" "$MAILBOX" >> "$WATCH_LOG" 2>&1 &
-WATCH_PID=$!
-echo "$WATCH_PID" > "$WATCH_PID_FILE"
-disown 2>/dev/null || true
-sleep 0.4
-
-if ! kill -0 "$WATCH_PID" 2>/dev/null; then
-  echo "Watcher failed to start. See $WATCH_LOG" >&2
-  rm -f "$WATCH_PID_FILE"
-  exit 1
-fi
-# 不在这里做 pgrep count（process substitution 的 subshell 会让计数翻倍误报）；
-# orphan 防护由前面的预先 pkill 负责。
-echo "Watcher started (pid $WATCH_PID, log $WATCH_LOG)"
+# watcher 在独立 OS session 中运行。即使 register 是从短生命周期的 AI tool
+# shell 调用，也不会在 tool session 结束时被进程组清理。
+ai-watch-service restart "$ROLE" "$MAILBOX"
 
 # .gitignore reminder
 GITIGNORE="$PWD/.gitignore"

@@ -95,7 +95,7 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
 | `File not found: <path>` | `--file` 路径错 | 用绝对路径或确认文件存在 |
 | `Cannot ping yourself (from=to=...)` | `--from` 和 `<to>` 同一个 role | 检查参数 |
 | `target '<role>' not registered yet` | 对方还没 `ai-pane-register` | 让对方先 register |
-| 对方收到但没自动提交（卡输入框） | watcher 还在用旧代码 | `pkill -f ai-collab-watch` 然后重新 `ai-pane-register <role>` |
+| 消息已入邮箱但没有 `notification: dispatched` | watcher 停止、session 失效或 osascript 注入失败 | 先看 `.watch-<role>.log`；`ai-ping` 会自动拉起停止的 watcher，session 变化时重新 `ai-pane-register <role>` |
 | `Timeout after Ns — no reply yet` | `--wait` 等过头了，对方还没回 | 检查对方 pane / 调大 `--timeout` |
 
 ## 常见误区
@@ -170,4 +170,4 @@ ai-ping codex --kind review-response --reply-to 20260511-153000-abc123 --file /t
 └── .watch-claude.log
 ```
 
-调试时最有用的两个文件：`.watch-<role>.log`（看 watcher dispatch 是否 ok）+ `inbox/<role>/<id>.md`（看消息内容是否对）。
+调试时最有用的两个文件：`.watch-<role>.log`（看 watcher dispatch 是否 ok）+ `inbox/<role>/<id>.md`（看消息内容是否对）。只有成功注入目标 session 后才会生成 `<id>.md.dispatched`；`ai-ping` 会等待最多 4 秒并明确报告是否确认投递。
