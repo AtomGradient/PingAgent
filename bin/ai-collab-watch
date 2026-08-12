@@ -120,7 +120,19 @@ process_file() {
   # 原子目录锁避免两个 watcher 同时投递。只有 inject 成功后才写 dispatched；
   # session 失效或 osascript 失败时消息保持 pending，不能静默丢失。
   local dispatch_lock="${path}.dispatching"
-  mkdir "$dispatch_lock" 2>/dev/null || return 0
+  local lock_pid=""
+  if ! mkdir "$dispatch_lock" 2>/dev/null; then
+    lock_pid=$(cat "$dispatch_lock/pid" 2>/dev/null || true)
+    if [[ "$lock_pid" =~ ^[0-9]+$ ]] && kill -0 "$lock_pid" 2>/dev/null && \
+       ps -ww -p "$lock_pid" -o command= 2>/dev/null | grep -Fq "ai-collab-watch $ROLE $MAILBOX"; then
+      return 0
+    fi
+    log "WARNING: clearing stale dispatch lock for $fname (owner=${lock_pid:-unknown})"
+    rm -f "$dispatch_lock/pid"
+    rmdir "$dispatch_lock" 2>/dev/null || return 0
+    mkdir "$dispatch_lock" 2>/dev/null || return 0
+  fi
+  printf '%s\n' "$$" > "$dispatch_lock/pid"
 
   local sender kind id reply_to
   sender=$(extract_field "$path" from)
@@ -147,6 +159,7 @@ process_file() {
   else
     log "WARNING: inject failed for $fname"
   fi
+  rm -f "$dispatch_lock/pid"
   rmdir "$dispatch_lock" 2>/dev/null || true
 }
 

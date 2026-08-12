@@ -7,6 +7,9 @@ export PATH="$REPO_ROOT/bin:$PATH"
 TEST_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/pingagent-delivery.XXXXXX")
 cleanup() {
   ai-watch-service stop target "$TEST_ROOT/.ai-mailbox" >/dev/null 2>&1 || true
+  if [[ -f "$TEST_ROOT/crash-child.pid" ]]; then
+    kill "$(cat "$TEST_ROOT/crash-child.pid")" >/dev/null 2>&1 || true
+  fi
   rm -rf "$TEST_ROOT"
 }
 trap cleanup EXIT
@@ -40,6 +43,18 @@ cat > "$MOCK_FAIL" <<'EOF'
 printf 'session not found: test-target-session\n'
 EOF
 chmod 0755 "$MOCK_FAIL"
+
+MOCK_CRASH="$TEST_ROOT/osascript-crash-once"
+cat > "$MOCK_CRASH" <<EOF
+#!/usr/bin/env bash
+if [[ ! -f "$TEST_ROOT/crash-started" ]]; then
+  touch "$TEST_ROOT/crash-started"
+  printf '%s\n' "\$\$" > "$TEST_ROOT/crash-child.pid"
+  sleep 30
+fi
+printf 'ok\n'
+EOF
+chmod 0755 "$MOCK_CRASH"
 
 wait_for_file() {
   local path="$1" attempt=0
@@ -89,10 +104,32 @@ if [[ -f "$MAILBOX/inbox/target/failure.md.dispatched" ]]; then
 fi
 ai-watch-service stop target "$MAILBOX"
 
+echo "test: stale dispatch lock recovers after watcher kill -9"
+export AI_COLLAB_OSASCRIPT="$MOCK_CRASH"
+ai-watch-service start target "$MAILBOX" >/dev/null
+write_message crash
+wait_for_file "$TEST_ROOT/crash-started"
+CRASH_WATCHER_PID=$(cat "$MAILBOX/.watch-target.pid")
+CRASH_CHILD_PID=$(cat "$TEST_ROOT/crash-child.pid")
+kill -9 "$CRASH_WATCHER_PID"
+kill "$CRASH_CHILD_PID" >/dev/null 2>&1 || true
+sleep 0.2
+export AI_COLLAB_OSASCRIPT="$MOCK_OK"
+ai-watch-service start target "$MAILBOX" >/dev/null
+wait_for_file "$MAILBOX/inbox/target/crash.md.dispatched"
+if [[ -d "$MAILBOX/inbox/target/crash.md.dispatching" ]]; then
+  echo "stale dispatch lock was not removed" >&2
+  exit 1
+fi
+ai-watch-service stop target "$MAILBOX"
+
 echo "test: ai-ping auto-recovers a stopped registered target"
 export AI_COLLAB_OSASCRIPT="$MOCK_OK"
 export ITERM_SESSION_ID="test:test-sender-session"
-PING_OUTPUT=$(cd "$TEST_ROOT" && ai-ping target --kind notice "auto-heal test" 2>&1)
+pushd "$TEST_ROOT" >/dev/null
+ai-ping target --kind notice "auto-heal test" > "$TEST_ROOT/ai-ping.out" 2>&1
+popd >/dev/null
+PING_OUTPUT=$(cat "$TEST_ROOT/ai-ping.out")
 printf '%s\n' "$PING_OUTPUT"
 grep -q "attempting detached recovery" <<<"$PING_OUTPUT"
 grep -q "notification: dispatched" <<<"$PING_OUTPUT"

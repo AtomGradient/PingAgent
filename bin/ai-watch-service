@@ -16,6 +16,13 @@ if [[ ! "$ROLE" =~ ^[a-z0-9_-]+$ ]]; then
   echo "Invalid role: $ROLE" >&2
   exit 2
 fi
+if [[ ! -d "$MAILBOX" ]]; then
+  case "$ACTION" in
+    start|restart) mkdir -p "$MAILBOX" ;;
+    *) exit 1 ;;
+  esac
+fi
+MAILBOX=$(cd "$MAILBOX" && pwd -P)
 
 PID_FILE="$MAILBOX/.watch-$ROLE.pid"
 WATCH_LOG="$MAILBOX/.watch-$ROLE.log"
@@ -27,7 +34,7 @@ watcher_pid() {
   pid=$(cat "$PID_FILE" 2>/dev/null || true)
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
-  ps -ww -p "$pid" -o command= 2>/dev/null | grep -Fq "$WATCH_PATTERN"
+  ps -ww -p "$pid" -o command= 2>/dev/null | grep -Fq "$WATCH_PATTERN" || return 1
   printf '%s\n' "$pid"
 }
 
@@ -52,7 +59,7 @@ stop_watcher() {
 }
 
 start_watcher() {
-  local watcher_bin pid attempt launcher_pid
+  local watcher_bin pid attempt watcher_pid_candidate
   mkdir -p "$MAILBOX/inbox/$ROLE" "$MAILBOX/.panes"
   watcher_bin=$(command -v ai-collab-watch 2>/dev/null || true)
   if [[ -z "$watcher_bin" ]]; then
@@ -62,7 +69,7 @@ start_watcher() {
 
   rm -f "$PID_FILE"
   if command -v python3 >/dev/null 2>&1; then
-    launcher_pid=$(python3 - "$watcher_bin" "$ROLE" "$MAILBOX" "$WATCH_LOG" <<'PY'
+    watcher_pid_candidate=$(python3 - "$watcher_bin" "$ROLE" "$MAILBOX" "$WATCH_LOG" <<'PY'
 import subprocess
 import sys
 
@@ -80,7 +87,7 @@ print(child.pid)
 PY
 )
   elif command -v perl >/dev/null 2>&1; then
-    launcher_pid=$(perl -MPOSIX=setsid -e '
+    watcher_pid_candidate=$(perl -MPOSIX=setsid -e '
       my ($log_path, @cmd) = @ARGV;
       my $pid = fork();
       die "fork failed: $!" unless defined $pid;
@@ -105,7 +112,7 @@ PY
     sleep 0.1
     attempt=$((attempt + 1))
   done
-  echo "Watcher failed to start (launcher pid $launcher_pid). See $WATCH_LOG" >&2
+  echo "Watcher failed to start (candidate pid $watcher_pid_candidate). See $WATCH_LOG" >&2
   return 1
 }
 
