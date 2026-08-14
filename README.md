@@ -162,7 +162,7 @@ echo "..." | ai-ping <to>                                  # stdin
 - **`.dispatched` sidecar 去重**：只有 osascript 返回明确的 `ok` 后才创建；`session not found`、Automation `-1743` 或未知返回都保持未派发
 - **sidecar 不是消费回执**：它只表示 iTerm2 接受了注入；AI 是否读取、处理仍以 peer 回复或显式 receipt 为准。升级前留下的空 sidecar 不能追溯证明真实送达
 - **Harness typed transport**：`ai-harness-transport` 只接受 Harness 已解析并 fencing 的 exact iTerm session，不解析 role、不选择 mailbox、不写 `.dispatched`。它只在 exact session 注入得到明确 `ok` 后返回结构化、去除 raw session 的 transport evidence；policy route、delivery ACK 与 consumption ACK 仍由 Harness Host 验证。
-- **Harness participant mode**：Harness 启动的 participant 仍使用相同 `ai-ping <to>` / `--reply-to <delivery-id>` 命令，但 intent 经 Host-issued scoped context 返回 Host；Host 结合本地 IPC peer PID 与 exact owned descendant process chain 核验 sender。该模式禁止 `--from`，不会写入或回退到 legacy mailbox；当前 delivery 等待/查询由 Host read model 承担，不使用 legacy `--wait`。
+- **Harness participant mode**：Harness 启动的 participant 仍使用相同 `ai-ping <to>` / `--reply-to <delivery-id>` 命令，但 intent 经 Host-issued scoped context 返回 Host；Host 结合本地 IPC peer PID 与 exact owned descendant process chain 核验 sender。Host 将 route/envelope 持久化后，命令立即返回紧凑的 `accepted` 结果；dispatch、delivery/consumption ACK、retry 与 restart recovery 由 Host 独立监督。正常 ACK 只进入机器状态/UI/审计，不作为“对方已收到”消息重新注入 Agent、触发模型推理或形成 ACK 循环。该模式禁止 `--from`，不会写入或回退到 legacy mailbox；显式查询/等待使用 Host read model，不复用 legacy `--wait`。
 - **atomic write**：`mktemp + mv`，watcher 不会读到半截写入的文件
 - **`sent/` 是 audit log**：发件人那边永远有副本，方便追溯
 - **`--wait` 默认 300s**：低于 Claude Code Bash tool 上限 600s，避免误超时

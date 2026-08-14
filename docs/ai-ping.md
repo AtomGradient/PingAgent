@@ -18,7 +18,7 @@ ai-ping reviewer --kind review-request --file review.md
 ai-ping analyst --kind review-response --reply-to <delivery-id> --file response.md
 ```
 
-sender identity 不来自 `<to>`、`--from` 或环境变量字符串，而由 Host-issued scoped capability、Unix socket peer PID、exact participant generation 和 Harness-owned descendant process chain 共同核验。`--from` 会被拒绝；当前 `--wait` 也会被拒绝，Scenario delivery 的查询/等待由 Host read model 提供。若 scoped context 存在但无效，命令 fail closed，不回退 legacy mailbox。PingAgent 只是简洁入口和 exact-session transport；policy、route、journal、delivery/consumption state 始终由 Host 持有。
+sender identity 不来自 `<to>`、`--from` 或环境变量字符串，而由 Host-issued scoped capability、Unix socket peer PID、exact participant generation 和 Harness-owned descendant process chain 共同核验。Host 持久化 route/envelope 后，`ai-ping` 立即输出紧凑的 `accepted` 结果；调用 shell/Agent 无须等待 receiver 消费。dispatch、delivery/consumption ACK、retry 与 Host restart recovery 独立继续，显式查询/等待走 Host read model。正常 ACK 是机器 receipt，不重新注入 Agent 会话、不触发模型推理，也不要求 Agent 输出“对方已收到”。`--from` 会被拒绝；Harness 中的 `--wait` 也会被拒绝，避免与 legacy“等待业务回复”语义混淆。若 scoped context 存在但无效，命令 fail closed，不回退 legacy mailbox。PingAgent 只是简洁入口和 exact-session transport；policy、route、journal、delivery/consumption state 始终由 Host 持有。
 
 ## 速查（5 个最常用 pattern）
 
