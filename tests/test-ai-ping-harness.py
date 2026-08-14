@@ -145,3 +145,42 @@ def test_harness_mode_rejects_sender_spoof_and_legacy_wait(
         assert completed.returncode != 0
     assert not log.exists()
     assert not (tmp_path / ".ai-mailbox").exists()
+
+
+def test_harness_mode_fails_closed_on_invalid_context(tmp_path: Path) -> None:
+    cases = (
+        "symlink-context",
+        "relative-client",
+        "relative-pythonpath",
+        "missing-client",
+    )
+    for case in cases:
+        case_root = tmp_path / case
+        case_root.mkdir()
+        environment, context, log = _environment(case_root)
+        if case == "symlink-context":
+            symlink = case_root / "participant-context-link.json"
+            symlink.symlink_to(context)
+            environment["AI_COLLAB_HARNESS_CONTEXT"] = str(symlink)
+        elif case == "relative-client":
+            environment["AI_COLLAB_HARNESS_CLIENT_EXECUTABLE"] = "participant-client"
+        elif case == "relative-pythonpath":
+            environment["AI_COLLAB_HARNESS_CLIENT_PYTHONPATH"] = "client-pythonpath"
+        else:
+            environment["AI_COLLAB_HARNESS_CLIENT_EXECUTABLE"] = str(
+                case_root / "missing-participant-client"
+            )
+
+        completed = subprocess.run(
+            (str(AI_PING), "reviewer", "message"),
+            cwd=case_root,
+            env=environment,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        assert completed.returncode != 0, case
+        assert not log.exists(), case
+        assert not (case_root / ".ai-mailbox").exists(), case
