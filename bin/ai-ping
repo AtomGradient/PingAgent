@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ai-ping <to> [options] [<message>]
-# 把消息写进 .ai-mailbox/inbox/<to>/。watcher 会负责转发到对方 pane。
+# Legacy 模式写 mailbox；Harness participant 模式把 intent 交回 Host。
 set -euo pipefail
 
 usage() {
@@ -82,6 +82,65 @@ validate_role() {
 validate_role "<to>" "$TO"
 if [[ -n "$FROM" ]]; then
   validate_role "--from" "$FROM"
+fi
+
+# Harness participant mode: the Agent-facing command stays the same, but the
+# intent returns to the authoritative Host instead of creating legacy mailbox
+# state.  Environment values only locate the Host-issued context and canonical
+# product client; Host still requires the scoped capability plus owned-process
+# proof before accepting the sender.
+if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" ]]; then
+  if $FROM_EXPLICIT; then
+    echo "--from is forbidden inside a Harness Scenario; sender identity is scoped by Host." >&2
+    exit 1
+  fi
+  if $WAIT; then
+    echo "--wait is not available in Harness participant mode yet; inspect delivery state through Host." >&2
+    exit 1
+  fi
+  HARNESS_CLIENT="${AI_COLLAB_HARNESS_CLIENT_EXECUTABLE:-}"
+  HARNESS_PYTHONPATH="${AI_COLLAB_HARNESS_CLIENT_PYTHONPATH:-}"
+  if [[ "$HARNESS_CLIENT" != /* || ! -x "$HARNESS_CLIENT" || -L "$HARNESS_CLIENT" ]]; then
+    echo "Harness participant client executable is unavailable." >&2
+    exit 1
+  fi
+  if [[ "$HARNESS_PYTHONPATH" != /* || ! -d "$HARNESS_PYTHONPATH" || -L "$HARNESS_PYTHONPATH" ]]; then
+    echo "Harness participant client module path is unavailable." >&2
+    exit 1
+  fi
+  if [[ ! -f "$AI_COLLAB_HARNESS_CONTEXT" || -L "$AI_COLLAB_HARNESS_CONTEXT" ]]; then
+    echo "Harness participant context is unavailable." >&2
+    exit 1
+  fi
+  HARNESS_OPERATION="send"
+  HARNESS_ARGS=(
+    -m edgestudio.harness.participant_client
+    "$HARNESS_OPERATION"
+    --context "$AI_COLLAB_HARNESS_CONTEXT"
+    --to "$TO"
+    --kind "$KIND"
+  )
+  if [[ -n "$REPLY_TO" ]]; then
+    HARNESS_OPERATION="reply"
+    HARNESS_ARGS=(
+      -m edgestudio.harness.participant_client
+      "$HARNESS_OPERATION"
+      --context "$AI_COLLAB_HARNESS_CONTEXT"
+      --to "$TO"
+      --kind "$KIND"
+      --reply-to "$REPLY_TO"
+    )
+  fi
+  if [[ -n "$FILE" ]]; then
+    HARNESS_ARGS+=(--file "$FILE")
+  elif [[ -n "$MSG" ]]; then
+    HARNESS_ARGS+=(--message "$MSG")
+  elif [[ -t 0 ]]; then
+    echo "No message body. Use --file, pass message as args, or pipe via stdin." >&2
+    exit 1
+  fi
+  export PYTHONPATH="$HARNESS_PYTHONPATH"
+  exec "$HARNESS_CLIENT" "${HARNESS_ARGS[@]}"
 fi
 
 # 找到当前目录向上的 mailbox。存在嵌套 mailbox 时，不能简单选择最近的：

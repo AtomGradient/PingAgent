@@ -1,6 +1,6 @@
 # ai-ping 完全指南
 
-把消息写成 `.ai-mailbox/inbox/<to>/<msg-id>.md` 的 CLI 工具。watcher 监听 inbox 并用 osascript 自动注入到对方 pane。
+同一个 Agent-facing CLI 支持两种明确隔离的运行模式：普通项目中写入 legacy `.ai-mailbox/`，watcher 再注入对方 pane；由 EdgeStudio Harness 启动的 Scenario participant 中，将 send/reply intent 交回权威 Host，不创建或回退到 legacy mailbox。
 
 ## 命令签名
 
@@ -8,6 +8,17 @@
 ai-ping <to> [options] [<message-words...>]
 ai-ping doctor
 ```
+
+## Harness Scenario 模式
+
+Harness 只在它拥有的 participant process chain 中注入 scoped context locator、产品 client locator 与 `ai-ping`。此时命令形式保持不变：
+
+```bash
+ai-ping reviewer --kind review-request --file review.md
+ai-ping analyst --kind review-response --reply-to <delivery-id> --file response.md
+```
+
+sender identity 不来自 `<to>`、`--from` 或环境变量字符串，而由 Host-issued scoped capability、Unix socket peer PID、exact participant generation 和 Harness-owned descendant process chain 共同核验。`--from` 会被拒绝；当前 `--wait` 也会被拒绝，Scenario delivery 的查询/等待由 Host read model 提供。若 scoped context 存在但无效，命令 fail closed，不回退 legacy mailbox。PingAgent 只是简洁入口和 exact-session transport；policy、route、journal、delivery/consumption state 始终由 Host 持有。
 
 ## 速查（5 个最常用 pattern）
 
@@ -74,6 +85,8 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
 ```
 
 消息文件 = YAML frontmatter + markdown 正文。frontmatter 至少有 `id` `from` `to` `kind` `created`，回复时还有 `reply_to`。
+
+上图只描述 legacy mailbox 模式。Harness Scenario 模式是 `participant ai-ping → scoped product client → Host policy/delivery → exact-session transport`，不会产生 `.ai-mailbox` 文件。
 
 ## mailbox 选择规则
 
