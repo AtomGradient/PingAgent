@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ai-collab-watch <role> <mailbox-dir>
-# 监听 .ai-mailbox/inbox/<role>/ 的新消息文件，用 osascript 把短通知注入本 pane。
+# 监听 .ai-mailbox/inbox/<role>/ 与 legacy .ai-mailbox/outbox/<role>/ 的新消息，
+# 用 osascript 把短通知注入本 pane。
 # 通常由 ai-pane-register 自动启动，不需要手动跑。
 set -euo pipefail
 
@@ -26,7 +27,8 @@ if [[ -z "$SESSION_UUID" || "$SESSION_UUID" == "null" ]]; then
 fi
 
 INBOX="$MAILBOX/inbox/$ROLE"
-mkdir -p "$INBOX"
+LEGACY_OUTBOX="$MAILBOX/outbox/$ROLE"
+mkdir -p "$INBOX" "$LEGACY_OUTBOX"
 PID_FILE="$MAILBOX/.watch-$ROLE.pid"
 printf '%s\n' "$$" > "$PID_FILE"
 
@@ -143,7 +145,7 @@ process_file() {
   # 计算项目根（mailbox 的父目录）
   local project_root rel_path
   project_root=$(dirname "$MAILBOX")
-  rel_path=".ai-mailbox/inbox/$ROLE/$fname"
+  rel_path="${path#"$project_root/"}"
 
   # 构造给 AI 的通知（一行，避免在 TUI 输入框里换行）
   local notif
@@ -166,9 +168,11 @@ process_file() {
 log "ai-collab-watch starting: role=$ROLE mailbox=$MAILBOX session=$SESSION_UUID"
 
 # 启动时扫描一次（处理 watcher 启动前已到达的消息）
-for f in "$INBOX"/*.md; do
-  [[ -f "$f" ]] || continue
-  process_file "$f"
+for delivery_dir in "$INBOX" "$LEGACY_OUTBOX"; do
+  for f in "$delivery_dir"/*.md; do
+    [[ -f "$f" ]] || continue
+    process_file "$f"
+  done
 done
 
 # 主循环：fswatch 优先，否则 polling
@@ -176,17 +180,19 @@ if command -v fswatch >/dev/null 2>&1; then
   log "using fswatch (event-driven)"
   # -0: NUL-terminated paths; 监听整个 inbox 目录
   while IFS= read -r -d "" path; do
-    # fswatch 的 path 可能是目录或文件；只处理 inbox 下的 .md
-    if [[ "$path" == "$INBOX"/*.md ]]; then
+    # fswatch 的 path 可能是目录或文件；只处理目标 role 两个收件目录下的 .md
+    if [[ "$path" == "$INBOX"/*.md || "$path" == "$LEGACY_OUTBOX"/*.md ]]; then
       process_file "$path"
     fi
-  done < <(fswatch -0 "$INBOX")
+  done < <(fswatch -0 "$INBOX" "$LEGACY_OUTBOX")
 else
   log "fswatch not found, falling back to 1s polling. Install: brew install fswatch"
   while true; do
-    for f in "$INBOX"/*.md; do
-      [[ -f "$f" ]] || continue
-      process_file "$f"
+    for delivery_dir in "$INBOX" "$LEGACY_OUTBOX"; do
+      for f in "$delivery_dir"/*.md; do
+        [[ -f "$f" ]] || continue
+        process_file "$f"
+      done
     done
     sleep 1
   done

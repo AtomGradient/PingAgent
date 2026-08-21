@@ -186,22 +186,25 @@ if [[ -f "$MAILBOX/.panes/$TO.json" ]]; then
   fi
 fi
 
-# --wait: 轮询自己 inbox 找 reply_to=$MSG_ID 的回复
+# --wait: 轮询自己 inbox 和 legacy outbox 找 reply_to=$MSG_ID 的回复
 if $WAIT; then
   echo "Waiting for reply to $MSG_ID (timeout ${TIMEOUT}s)..."
   REPLY_INBOX="$MAILBOX/inbox/$FROM"
-  mkdir -p "$REPLY_INBOX"
+  REPLY_LEGACY_OUTBOX="$MAILBOX/outbox/$FROM"
+  mkdir -p "$REPLY_INBOX" "$REPLY_LEGACY_OUTBOX"
   ELAPSED=0
   INTERVAL=2
   while (( ELAPSED < TIMEOUT )); do
-    for f in "$REPLY_INBOX"/*.md; do
-      [[ -f "$f" ]] || continue
-      if grep -qE "^reply_to: *$MSG_ID *$" "$f" 2>/dev/null; then
-        echo ""
-        echo "=== Reply received: $(basename "$f") ==="
-        cat "$f"
-        exit 0
-      fi
+    for reply_dir in "$REPLY_INBOX" "$REPLY_LEGACY_OUTBOX"; do
+      for f in "$reply_dir"/*.md; do
+        [[ -f "$f" ]] || continue
+        if grep -qE "^reply_to: *$MSG_ID *$" "$f" 2>/dev/null; then
+          echo ""
+          echo "=== Reply received: $(basename "$f") ==="
+          cat "$f"
+          exit 0
+        fi
+      done
     done
     sleep "$INTERVAL"
     ELAPSED=$((ELAPSED + INTERVAL))

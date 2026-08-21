@@ -15,7 +15,8 @@ cleanup() {
 trap cleanup EXIT
 
 MAILBOX="$TEST_ROOT/.ai-mailbox"
-mkdir -p "$MAILBOX/.panes" "$MAILBOX/inbox/target" "$MAILBOX/inbox/sender" "$MAILBOX/sent"
+mkdir -p "$MAILBOX/.panes" "$MAILBOX/inbox/target" "$MAILBOX/inbox/sender" \
+  "$MAILBOX/outbox/target" "$MAILBOX/outbox/sender" "$MAILBOX/sent"
 
 cat > "$MAILBOX/.panes/target.json" <<'EOF'
 {
@@ -81,6 +82,21 @@ delivery test
 EOF
 }
 
+write_legacy_outbox_message() {
+  local id="$1"
+  cat > "$MAILBOX/outbox/target/$id.md" <<EOF
+---
+id: $id
+from: sender
+to: target
+kind: notice
+created: 2026-08-21T00:00:00+0800
+---
+
+legacy outbox delivery test
+EOF
+}
+
 echo "test: successful injection writes dispatched only after ok"
 export AI_COLLAB_OSASCRIPT="$MOCK_OK"
 ai-watch-service start target "$MAILBOX" >/dev/null
@@ -92,6 +108,13 @@ if ai-watch-service status target "$MAILBOX" >/dev/null 2>&1; then
   echo "watcher should be stopped" >&2
   exit 1
 fi
+
+echo "test: legacy outbox delivery is monitored"
+export AI_COLLAB_OSASCRIPT="$MOCK_OK"
+ai-watch-service start target "$MAILBOX" >/dev/null
+write_legacy_outbox_message legacy-outbox
+wait_for_file "$MAILBOX/outbox/target/legacy-outbox.md.dispatched"
+ai-watch-service stop target "$MAILBOX"
 
 echo "test: failed injection stays pending"
 export AI_COLLAB_OSASCRIPT="$MOCK_FAIL"

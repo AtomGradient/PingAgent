@@ -30,7 +30,7 @@ if [[ -z "$SESSION_UUID" || "$SESSION_UUID" == "$ITERM_SESSION_ID" ]]; then
 fi
 
 MAILBOX="$PWD/.ai-mailbox"
-mkdir -p "$MAILBOX/inbox/$ROLE" "$MAILBOX/sent" "$MAILBOX/.panes"
+mkdir -p "$MAILBOX/inbox/$ROLE" "$MAILBOX/outbox/$ROLE" "$MAILBOX/sent" "$MAILBOX/.panes"
 
 # 检测是否在覆盖已有的 different-UUID 注册（防止用户没意识到老 pane 被静默 orphan）
 PREV_PANE_FILE="$MAILBOX/.panes/$ROLE.json"

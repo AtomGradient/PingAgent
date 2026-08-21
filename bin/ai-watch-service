@@ -52,15 +52,17 @@ stop_watcher() {
   fi
   pkill -f "$WATCH_PATTERN" 2>/dev/null || true
   pkill -f "fswatch.*$MAILBOX/inbox/$ROLE" 2>/dev/null || true
+  pkill -f "fswatch.*$MAILBOX/outbox/$ROLE" 2>/dev/null || true
   sleep 0.2
   pkill -9 -f "$WATCH_PATTERN" 2>/dev/null || true
   pkill -9 -f "fswatch.*$MAILBOX/inbox/$ROLE" 2>/dev/null || true
+  pkill -9 -f "fswatch.*$MAILBOX/outbox/$ROLE" 2>/dev/null || true
   rm -f "$PID_FILE"
 }
 
 start_watcher() {
   local watcher_bin pid attempt watcher_pid_candidate
-  mkdir -p "$MAILBOX/inbox/$ROLE" "$MAILBOX/.panes"
+  mkdir -p "$MAILBOX/inbox/$ROLE" "$MAILBOX/outbox/$ROLE" "$MAILBOX/.panes"
   watcher_bin=$(command -v ai-collab-watch 2>/dev/null || true)
   if [[ -z "$watcher_bin" ]]; then
     echo "ai-collab-watch not found in PATH" >&2
