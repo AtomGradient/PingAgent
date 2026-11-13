@@ -2,14 +2,14 @@
 
 > 本文件 **既是给 AI 看的协议说明，也是给人看的使用手册**。把它复制到你项目的根目录后，两个 AI 都会读到这份说明，按里面的约定互发消息。
 
-本项目两个 AI 助手分别在两个 iTerm2 pane 里同时运行，例如：
+本项目两个 AI 助手分别在 iTerm2 pane 或 macOS Terminal 标签页里同时运行（两种终端可以混用），例如：
 
 - **codex**：写代码（开发者）
 - **claude**：审代码（审核者）
 
 > **role 名以实际注册为准**：本文档里的 `codex`/`claude` 只是示例名。每个 pane 的真实 role 是 `ai-pane-register <role>` 时用的那个名字（可能是任何名字，如 `pingagent1`）。用 `ls .ai-mailbox/.panes/` 查看当前实际注册的 role。
 
-通过 `.ai-mailbox/` 目录 + `ai-ping` CLI 互发消息，由后台 watcher 用 iTerm2 osascript 把短通知注入对方 pane。
+通过 `.ai-mailbox/` 目录 + `ai-ping` CLI 互发消息，由后台 watcher 用 osascript 把短通知注入对方的 iTerm2 pane 或 Terminal 标签页。下文统一称为 pane。
 
 ---
 
@@ -54,7 +54,7 @@ echo "请审核" | ai-ping <对方role> --kind review-request
 ai-ping doctor
 ```
 
-`--from` 默认从当前 iTerm2 session id 反查，**不要传**。`<to>` 必须是实际注册的 role 名（`ls .ai-mailbox/.panes/` 可查），不是本文档示例里的名字。
+`--from` 默认从当前终端 session id 反查，**不要传**。`<to>` 必须是实际注册的 role 名（`ls .ai-mailbox/.panes/` 可查），不是本文档示例里的名字。
 
 ---
 
@@ -62,8 +62,8 @@ ai-ping doctor
 
 你的 role 名 = 注册时用的名字，**不是你的产品名**（codex / claude CLI 所在的 pane 可能注册成任何 role）。
 
-1. 发消息**永远不传 `--from`**，让 `ai-ping` 从 `$ITERM_SESSION_ID` 自动反查你的注册 role。
-2. auto-detect 失败时，先自查：`ls .ai-mailbox/.panes/` 然后逐个 `cat`，对照自己的 `$ITERM_SESSION_ID` 找到自己的 role；对不上就**问用户**，绝不要拿文档示例名或自己的产品名自称。
+1. 发消息**永远不传 `--from`**，让 `ai-ping` 自动反查你的注册 role：iTerm2 使用 `$ITERM_SESSION_ID`；macOS Terminal 使用 `$TERM_SESSION_ID`（`TERM_PROGRAM=Apple_Terminal`）。
+2. auto-detect 失败时，先自查：`ls .ai-mailbox/.panes/` 然后逐个 `cat`，对照自己的终端 session id 找到自己的 role；Terminal 的 `session_uuid` 为 `terminal:$TERM_SESSION_ID`。对不上就**问用户**，绝不要拿文档示例名或自己的产品名自称。
 3. 伪装 `--from` 的代价：对方按消息 frontmatter 的 `from` 回信，回信会进没有 watcher 的 inbox，你永远收不到通知（回信黑洞）。`ai-ping` 检测到「显式 `--from` ≠ 本 pane 注册 role」会打 warning——看到 warning 就停下，改用真实 role 重发。
 
 ---
@@ -72,7 +72,7 @@ ai-ping doctor
 
 `ai-ping` 和 `ai-pane-unregister` 会从当前目录向上扫描 `.ai-mailbox/`，但不会盲目使用最近的一套：
 
-1. 优先选择当前 pane 的 `$ITERM_SESSION_ID` 已注册的 mailbox。
+1. 优先选择当前 pane 的终端 session id 已注册的 mailbox。
 2. `ai-ping` 自动 `--from` 时，如果目标 role 也在同一套 mailbox，就直接投递到那套。
 3. 如果目标 role 还没注册，消息仍写入当前 pane 已注册的 mailbox，保留"先排队、对方稍后注册"的语义。
 4. 显式 `--from` / 显式 `ai-pane-unregister <role>` 会尽量匹配当前 session 对应的那套；找不到时才退回 role-only 匹配或最近 mailbox。

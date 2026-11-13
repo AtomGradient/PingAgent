@@ -2,7 +2,7 @@
 
 # PingAgent
 
-> Make two AI agents living in two iTerm2 panes (e.g. Codex + Claude Code) talk to each other on demand: one writes code, the other reviews — without you copy-pasting between panes.
+> Make AI agents in iTerm2 panes or macOS Terminal tabs (e.g. Codex + Claude Code) talk to each other on demand: one writes code, the other reviews — without you copy-pasting between panes. Both terminal apps can participate in the same mailbox.
 
 ```
 ┌─ iTerm2 Pane A: Codex ─────────┐    ┌─ iTerm2 Pane B: Claude Code ───┐
@@ -31,9 +31,9 @@
 
 ## Requirements
 
-- macOS + iTerm2 (uses `osascript` to control sessions; **macOS-only** for now)
+- macOS with iTerm2 or the built-in Terminal app (uses `osascript` to locate and notify sessions)
 - bash 3.2+ (system bash on macOS works)
-- `jq` (preinstalled on macOS, or `brew install jq`)
+- `jq` (optional: `brew install jq`; a simple field parser is used otherwise)
 - `fswatch` (optional — falls back to 1 s polling otherwise; recommended: `brew install fswatch`)
 
 ## Install
@@ -46,7 +46,7 @@ cd PingAgent
 ```
 
 `install.sh` will:
-- Symlink `bin/ai-pane-register`, `bin/ai-pane-unregister`, `bin/ai-pane-doctor`, `bin/ai-ping`, `bin/ai-collab-watch`, `bin/ai-harness-transport` into `~/.local/bin/`
+- Symlink `bin/ai-pane-register`, `bin/ai-pane-unregister`, `bin/ai-pane-doctor`, `bin/ai-ping`, `bin/ai-collab-watch`, `bin/ai-harness-transport`, and the shared `bin/ai-terminal-common.sh` file into `~/.local/bin/`
 - Symlink `AGENTS.md` to `~/.config/ai-collab/AGENTS-template.md` (so you can copy it into any project from a stable location)
 - Check `$PATH`; suggest `brew install fswatch` if missing
 
@@ -73,7 +73,7 @@ ln -sf AGENTS.md CLAUDE.md
 echo '.ai-mailbox/' >> .gitignore
 ```
 
-### Every time you open a new iTerm2 pane
+### Every time you open a new iTerm2 pane or Terminal tab
 
 **Pane A (Codex):**
 ```bash
@@ -90,11 +90,13 @@ claude
 ```
 
 `ai-pane-register` does three things:
-1. Saves the current pane's `$ITERM_SESSION_ID` UUID into `.ai-mailbox/.panes/<role>.json`
+1. Detects the terminal and saves its identity and delivery target into `.ai-mailbox/.panes/<role>.json`: the UUID from `$ITERM_SESSION_ID` for iTerm2, or `$TERM_SESSION_ID` plus window ID, TTY, and session process for Terminal
 2. Starts `ai-collab-watch <role>` in the background (log: `.ai-mailbox/.watch-<role>.log`)
 3. Cleans up any old watcher for the same role+mailbox, then starts a fresh watcher
 
 Run `ai-pane-register` from the project root. If an ancestor directory already has `.ai-mailbox/`, `ai-pane-register` warns that the current command will use or create a nested mailbox; in most cases you should `cd` back to the ancestor project root instead.
+
+In Terminal, register two tabs with `ai-pane-register terminal_one` and `ai-pane-register terminal_two`, then start the AIs. Register directly in each tab's shell. AI child processes can identify the sender through inherited `$TERM_PROGRAM` / `$TERM_SESSION_ID` even without a TTY. If macOS asks for Automation permission during registration or delivery, allow the caller to control Terminal.
 
 **When you're done with a pane** (optional cleanup):
 
@@ -147,7 +149,7 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 ├── .gitignore                      # contains .ai-mailbox/
 └── .ai-mailbox/                    # gitignored working dir
     ├── .panes/
-    │   ├── codex.json              # role + iTerm session UUID + cwd
+    │   ├── codex.json              # role + terminal + session identity/target + cwd
     │   └── claude.json
     ├── inbox/
     │   ├── codex/<msg-id>.md       # messages addressed to codex
@@ -163,7 +165,8 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 
 - **Notifications are pointers, not content**: avoids osascript escaping/wrapping issues; AI reads the full message itself
 - **`.dispatched` sidecar dedup**: created only after osascript explicitly returns `ok`; `session not found`, Automation `-1743`, and unknown responses remain undispatched
-- **A sidecar is not a consumption receipt**: it only means iTerm2 accepted the injection. Use a peer reply or explicit receipt to prove that the AI read and handled it. Empty sidecars created by older versions cannot retroactively prove delivery
+- **A sidecar is not a consumption receipt**: it only means the target terminal accepted the injection. Use a peer reply or explicit receipt to prove that the AI read and handled it. Empty sidecars created by older versions cannot retroactively prove delivery
+- **Terminal targeting**: notifications require the registered window ID and TTY, without changing focus. The session process's start time and TTY are checked before delivery to guard against TTY reuse after closing a tab. Re-register after moving a tab to another window or restarting Terminal
 - **Harness typed transport**: `ai-harness-transport` accepts only an exact iTerm session already resolved and fenced by Harness. It does not resolve roles, choose a mailbox, or write `.dispatched`; it returns redacted structured transport evidence only after exact-session injection returns `ok`. Harness Host still validates policy routing, delivery ACK, and consumption ACK.
 - **Harness participant mode**: A Harness-launched participant keeps using `ai-ping <to>` and `--reply-to <delivery-id>`, but the intent returns to Host through a Host-issued scoped context. Host authenticates the sender with the local IPC peer PID and the exact owned descendant process chain. Once Host durably persists the route/envelope, the command returns a compact `accepted` result; Host independently supervises dispatch, delivery/consumption ACKs, retry, and restart recovery. Normal ACKs stay in machine state/UI/audit instead of being reinjected as “peer received it” Agent messages, triggering model inference, or creating ACK loops. This mode rejects `--from`, never writes or falls back to a legacy mailbox, and leaves explicit waiting/querying to the Host delivery read model instead of legacy `--wait`.
 - **Atomic write**: `mktemp + mv`, watcher never sees half-written files
@@ -185,6 +188,10 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 
 **`session not found`**:
 - iTerm2 was restarted, or the pane changed. No `.dispatched` sidecar is written; re-run `ai-pane-register <role>` in the new pane to retry
+- Terminal also leaves messages undispatched when the tab closes, moves to another window, or its session process exits. Re-run `ai-pane-register <role>` in the intended tab
+
+**Terminal still reports `ITERM_SESSION_ID not set`:**
+- The command is from an older installation. Check `command -v ai-pane-register`, then run `./install.sh` in this repository to update the links (or `./install.sh --copy` for a copy installation)
 
 **A message gets re-dispatched repeatedly:**
 - Inspect the watcher log first. Failed delivery intentionally leaves no `.dispatched` sidecar; the polling fallback (when fswatch is unavailable) will retry. Do not bulk-delete existing sidecars—operate only on a message you have confirmed should be resent
@@ -210,12 +217,13 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 ## Tests
 
 ```bash
-python -m pytest -q \
-  tests/test-ai-harness-transport.py tests/test-ai-ping-harness.py
+python3 -m pytest -q \
+  tests/test-ai-harness-transport.py tests/test-ai-ping-harness.py \
+  tests/test-terminal-support.py
 ./tests/test-ai-collab-watch.sh
 ```
 
-The regression suite covers successful injection, a missing session, Automation `-1743`, pre-upgrade sidecar deduplication, and fail-closed handling of an unknown successful response. It uses local osascript/fswatch test doubles and never injects text into a real iTerm2 session.
+The regression suite covers Terminal registration and cleanup, mixed-terminal messages, piped input, nested mailboxes, doctor, TTY reuse protection, delivery success/failure, Automation `-1743`, and sidecar deduplication. It uses local osascript/fswatch test doubles and never injects text into real terminals. Install pytest first, or run the Python tests with `uv run --with pytest python -m pytest -q tests/`.
 
 ## Protocol doc (for the AIs)
 

@@ -164,7 +164,7 @@ mailbox_has_role() {
 
 pane_file_has_session() {
   local pane_file="$1" session_uuid="$2"
-  [[ -f "$pane_file" ]] && grep -q "\"session_uuid\": *\"$session_uuid\"" "$pane_file" 2>/dev/null
+  [[ -f "$pane_file" ]] && [[ "$(ai_pane_field "$pane_file" session_uuid)" == "$session_uuid" ]]
 }
 
 role_for_session_in_mailbox() {
@@ -302,13 +302,9 @@ print_mailbox_candidates() {
   done
 }
 
-SESSION_UUID=""
-if [[ -n "${ITERM_SESSION_ID:-}" ]]; then
-  SESSION_UUID="${ITERM_SESSION_ID##*:}"
-  if [[ "$SESSION_UUID" == "$ITERM_SESSION_ID" ]]; then
-    SESSION_UUID=""
-  fi
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/ai-terminal-common.sh"
+ai_detect_terminal
 
 NEAREST_MAILBOX=$(find_nearest_mailbox || true)
 MAILBOX=""
@@ -321,7 +317,7 @@ if [[ -z "$NEAREST_MAILBOX" ]]; then
   exit 1
 fi
 
-# 自动检测 FROM（从当前 pane 的 ITERM_SESSION_ID 反查 .panes/）
+# 自动检测 FROM（从当前终端 session id 反查 .panes/）
 if [[ -z "$FROM" ]]; then
   if [[ -z "$SESSION_UUID" ]] || ! select_mailbox_for_auto_from; then
     echo "Cannot auto-detect --from in any .ai-mailbox upward from $PWD. Either:" >&2

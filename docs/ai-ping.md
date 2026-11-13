@@ -50,7 +50,7 @@ ai-ping doctor
 | `--file <path>` | | 从文件读消息正文。**推荐**：避免 shell 转义，保留代码块/换行 |
 | `--kind <kind>` | | 消息类型，默认 `msg`。完整表见下面 |
 | `--reply-to <id>` | | 这是对某条消息的回复。`<id>` 来自被回复消息的 frontmatter 里 `id:` 字段 |
-| `--from <role>` | | 显式指定发送者。默认从当前 pane 的 `$ITERM_SESSION_ID` 自动反查 |
+| `--from <role>` | | 显式指定发送者。默认从 iTerm2 的 `$ITERM_SESSION_ID` 或 Terminal 的 `$TERM_SESSION_ID` 自动反查 |
 | `--wait` | | 阻塞直到收到 `reply_to=本次msg_id` 的回复（每 2s 轮询） |
 | `--timeout <sec>` | | `--wait` 的最大等待秒数。默认 300 |
 | 位置参数 | | 短消息可直接作命令行参数；与 `--file` / stdin 三选一 |
@@ -78,7 +78,7 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
                                   │
                                   ▼
                             osascript 用 .panes/claude.json 里的
-                            session UUID 注入到对方 pane
+                            终端类型和会话目标注入到对方 pane
                                   │
                                   ▼
                           [ai-collab 收信] from=... id=... 自动出现 + 提交
@@ -86,15 +86,17 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
 
 消息文件 = YAML frontmatter + markdown 正文。frontmatter 至少有 `id` `from` `to` `kind` `created`，回复时还有 `reply_to`。
 
+Legacy mailbox 支持 iTerm2 和 macOS 自带 Terminal，也支持双方使用不同终端。Terminal 通过 `$TERM_SESSION_ID` 识别发送者，以注册时保存的窗口 ID + TTY 定位接收标签页，并校验会话进程防止 TTY 复用；旧的 iTerm2 注册文件仍可使用。请在启动 AI 前直接在标签页中注册，移动到其他窗口或重启后重新注册。首次使用可能需要允许 macOS 自动化权限来控制目标终端。
+
 上图只描述 legacy mailbox 模式。Harness Scenario 模式是 `participant ai-ping → scoped product client → Host policy/delivery → exact-session transport`，不会产生 `.ai-mailbox` 文件。
 
 ## mailbox 选择规则
 
 `ai-ping` 会从当前目录向上扫描 `.ai-mailbox/`，但不会盲目使用最近的一套：
 
-1. 默认自动 `--from` 时，优先选择“当前 pane 的 `$ITERM_SESSION_ID` 已注册，且目标 `<to>` 也注册在同一套”的 mailbox
+1. 默认自动 `--from` 时，优先选择“当前 pane 的终端 session id 已注册，且目标 `<to>` 也注册在同一套”的 mailbox
 2. 如果目标还没注册，则选择当前 pane 已注册的那套 mailbox，保留“消息先排队、对方稍后注册”的语义
-3. 显式传 `--from <role>` 时，仍会优先选择当前 session 对应 role 所在的 mailbox；没有 iTerm2 session 时，优先选择 `<from>` 和 `<to>` 都注册过的 mailbox
+3. 显式传 `--from <role>` 时，仍会优先选择当前 session 对应 role 所在的 mailbox；没有可识别的终端 session 时，优先选择 `<from>` 和 `<to>` 都注册过的 mailbox
 4. 只有找不到任何注册匹配时，才退回到最近的 `.ai-mailbox/`
 
 如果当前子目录里有残留或独立的 `.ai-mailbox/`，但当前 pane 实际注册在上层项目，`ai-ping` 会打印 `skipped nearer mailbox` 并把消息写到已注册 session 的那套 mailbox。
@@ -103,7 +105,7 @@ ai-ping claude "..."   ─►   inbox/claude/<id>.md
 
 ## doctor 诊断
 
-`ai-ping doctor` 是只读自检，不 kill、不删、不写。它会检查向上的 mailbox、当前 iTerm session 注册、watcher pid/orphan 状态、重复/分裂注册、无 watcher 的未派发 inbox、`sent/` 里的伪装 sender 历史、watcher log 注入错误、fswatch、`.gitignore`。全绿 exit 0；任何 WARN/FAIL exit 1。
+`ai-ping doctor` 是只读自检，不 kill、不删、不写。它会检查向上的 mailbox、当前终端 session 注册、watcher pid/orphan 状态、重复/分裂注册、无 watcher 的未派发 inbox、`sent/` 里的伪装 sender 历史、watcher log 注入错误、fswatch、`.gitignore`。全绿 exit 0；任何 WARN/FAIL exit 1。
 
 ## delivery 与 `.dispatched` 语义
 
@@ -130,7 +132,7 @@ watcher 只有在 osascript 以 0 退出且返回精确 `ok` 时才写 `<msg>.md
 
 | 错误信息 | 原因 | 解决 |
 |---|---|---|
-| `Cannot auto-detect --from` | 当前 pane 没注册 / `ITERM_SESSION_ID` 缺失 | 跑 `ai-pane-register <role>` 或显式 `--from <role>` |
+| `Cannot auto-detect --from` | 当前 pane 没注册 / 终端 session 环境变量缺失 | 在原终端直接跑 `ai-pane-register <role>`，确认 AI 子进程继承了会话环境 |
 | `No .ai-mailbox/ found upward from ...` | 当前目录不在已 register 过的项目下 | `cd <project>` 或确认 register 跑过 |
 | `<to> must be lowercase...` / `--from must be lowercase...` | role 名不合法 | 只使用小写字母、数字、下划线、短横线 |
 | `Role must be lowercase...` | `ai-pane-unregister <role>` 的 role 名不合法 | 只使用小写字母、数字、下划线、短横线 |
@@ -202,7 +204,7 @@ ai-ping codex --kind review-response --reply-to 20260511-153000-abc123 --file /t
 ```
 <project>/.ai-mailbox/
 ├── .panes/
-│   ├── codex.json              # 注册信息：session UUID + cwd + 时间戳
+│   ├── codex.json              # 终端类型 + 会话身份/目标 + cwd + 时间戳
 │   └── claude.json
 ├── inbox/
 │   ├── codex/<msg-id>.md       # 给 codex 的消息
@@ -215,4 +217,4 @@ ai-ping codex --kind review-response --reply-to 20260511-153000-abc123 --file /t
 └── .watch-claude.log
 ```
 
-调试时最有用的两个文件：`.watch-<role>.log`（看 `delivery confirmed` 或分类后的 `reason=`）+ `inbox/<role>/<id>.md`（看消息内容是否对）。运行 `./tests/test-ai-collab-watch.sh` 可验证 delivery failure-path，不会触碰真实 iTerm2 session。
+调试时最有用的两个文件：`.watch-<role>.log`（看 `delivery confirmed` 或分类后的 `reason=`）+ `inbox/<role>/<id>.md`（看消息内容是否对）。运行 `./tests/test-ai-collab-watch.sh` 和 `python3 -m pytest -q tests/test-terminal-support.py` 可验证两种终端的注册和派发，不会触碰真实终端。

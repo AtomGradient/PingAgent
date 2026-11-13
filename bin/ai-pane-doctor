@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Read-only diagnostics for PingAgent project mailboxes.
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/ai-terminal-common.sh"
 
 usage() {
   cat <<'EOF'
@@ -83,13 +85,7 @@ find_mailboxes() {
   done
 }
 
-SESSION_UUID=""
-if [[ -n "${ITERM_SESSION_ID:-}" ]]; then
-  SESSION_UUID="${ITERM_SESSION_ID##*:}"
-  if [[ "$SESSION_UUID" == "$ITERM_SESSION_ID" || -z "$SESSION_UUID" ]]; then
-    SESSION_UUID=""
-  fi
-fi
+ai_detect_terminal
 
 find_mailboxes
 
@@ -137,11 +133,9 @@ else
   done
 fi
 
-# 2. Current iTerm session registration.
-if [[ -z "${ITERM_SESSION_ID:-}" ]]; then
-  print_result FAIL "2 current session" "ITERM_SESSION_ID is not set" "run from the registered iTerm2 pane; do not guess --from"
-elif [[ -z "$SESSION_UUID" ]]; then
-  print_result FAIL "2 current session" "cannot parse UUID from ITERM_SESSION_ID=$ITERM_SESSION_ID" "run inside a normal iTerm2 pane and re-register"
+# 2. Current terminal session registration.
+if [[ -z "$SESSION_UUID" ]]; then
+  print_result FAIL "2 current session" "$SESSION_ERROR" "run from the registered iTerm2 pane or Terminal tab; do not guess --from"
 elif [[ -z "$SELECTED_ROLE" ]]; then
   print_result FAIL "2 current session" "session $SESSION_UUID is not registered in any upward mailbox" "run ai-pane-register <role> from the intended project root"
 else
@@ -276,7 +270,7 @@ for ((i = 0; i < MAILBOX_COUNT; i++)); do
   done
 done
 if [[ -n "$log_hits" ]]; then
-  print_result WARN "7 watcher log tail" "recent inject/session errors in: $log_hits" "re-run ai-pane-register <role>; if it persists, check iTerm2 session and macOS Automation permission"
+  print_result WARN "7 watcher log tail" "recent inject/session errors in: $log_hits" "re-run ai-pane-register <role>; if it persists, check the terminal session and macOS Automation permission"
 else
   print_result OK "7 watcher log tail" "no recent inject failed/session not found entries" "none"
 fi

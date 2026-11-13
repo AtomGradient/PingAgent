@@ -7,6 +7,9 @@ for arg in "$@"; do
 done
 
 case "${FAKE_OSASCRIPT_MODE:-success}" in
+  terminal_registration)
+    printf '42\n'
+    ;;
   success)
     printf 'ok\n'
     ;;

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # ai-pane-unregister [<role>]
 # 停止本 pane 的 watcher，清理注册文件。
-# 不传 role 时，从当前 iTerm2 session id 自动反查。
+# 不传 role 时，从当前终端 session id 自动反查。
 # 不动 inbox/sent/dispatched 文件（消息历史保留）。
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/ai-terminal-common.sh"
 
 ROLE="${1:-}"
 
@@ -30,7 +32,7 @@ find_nearest_mailbox() {
 
 pane_file_has_session() {
   local pane_file="$1" session_uuid="$2"
-  [[ -f "$pane_file" ]] && grep -q "\"session_uuid\": *\"$session_uuid\"" "$pane_file" 2>/dev/null
+  [[ -f "$pane_file" ]] && [[ "$(ai_pane_field "$pane_file" session_uuid)" == "$session_uuid" ]]
 }
 
 pane_session_uuid() {
@@ -111,13 +113,7 @@ print_mailbox_candidates() {
   done
 }
 
-SESSION_UUID=""
-if [[ -n "${ITERM_SESSION_ID:-}" ]]; then
-  SESSION_UUID="${ITERM_SESSION_ID##*:}"
-  if [[ "$SESSION_UUID" == "$ITERM_SESSION_ID" ]]; then
-    SESSION_UUID=""
-  fi
-fi
+ai_detect_terminal
 
 NEAREST_MAILBOX=$(find_nearest_mailbox || true)
 MAILBOX=""
@@ -128,12 +124,12 @@ if [[ -z "$NEAREST_MAILBOX" ]]; then
   exit 1
 fi
 
-# 自动检测 role（从当前 ITERM_SESSION_ID）
+# 自动检测 role（从当前终端 session id）
 if [[ -z "$ROLE" ]]; then
   if [[ -z "$SESSION_UUID" ]] || ! select_mailbox_for_current_session; then
     echo "Cannot auto-detect role in any .ai-mailbox upward from $PWD. Either:" >&2
     echo "  1) pass <role> explicitly: ai-pane-unregister <role>" >&2
-    echo "  2) run from the same iTerm2 pane that ran ai-pane-register" >&2
+    echo "  2) run from the same iTerm2 pane or Terminal tab that ran ai-pane-register" >&2
     echo "" >&2
     echo "Currently registered:" >&2
     print_mailbox_candidates

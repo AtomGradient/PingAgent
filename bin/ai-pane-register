@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # ai-pane-register <role>
-# 注册当前 iTerm2 pane 的 role + session id，并启动 watcher。
+# 注册当前 iTerm2 pane / macOS Terminal tab，并启动 watcher。
 # 在每个 pane 启动两个 AI 之前各跑一次。
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/ai-terminal-common.sh"
 
 ROLE="${1:-}"
 if [[ -z "$ROLE" ]]; then
@@ -21,16 +23,17 @@ if [[ "$ROLE" == "doctor" ]]; then
   exit 1
 fi
 
-if [[ -z "${ITERM_SESSION_ID:-}" ]]; then
-  echo "ITERM_SESSION_ID not set. Run this from inside an iTerm2 pane." >&2
+ai_detect_terminal
+if [[ -z "$SESSION_UUID" ]]; then
+  echo "$SESSION_ERROR" >&2
   exit 1
 fi
-
-# ITERM_SESSION_ID format: w<n>t<n>p<n>:<UUID>
-SESSION_UUID="${ITERM_SESSION_ID##*:}"
-if [[ -z "$SESSION_UUID" || "$SESSION_UUID" == "$ITERM_SESSION_ID" ]]; then
-  echo "Cannot parse UUID from ITERM_SESSION_ID=$ITERM_SESSION_ID" >&2
-  exit 1
+TERMINAL_TTY=""
+TERMINAL_WINDOW_ID=""
+TERMINAL_OWNER_PID=""
+TERMINAL_OWNER_FINGERPRINT=""
+if [[ "$TERMINAL_BACKEND" == "terminal" ]]; then
+  ai_resolve_terminal_tab
 fi
 
 find_parent_mailbox() {
@@ -66,11 +69,7 @@ mkdir -p "$MAILBOX/inbox/$ROLE" "$MAILBOX/sent" "$MAILBOX/.panes"
 # 检测是否在覆盖已有的 different-UUID 注册（防止用户没意识到老 pane 被静默 orphan）
 PREV_PANE_FILE="$MAILBOX/.panes/$ROLE.json"
 if [[ -f "$PREV_PANE_FILE" ]]; then
-  if command -v jq >/dev/null 2>&1; then
-    PREV_UUID=$(jq -r '.session_uuid // ""' "$PREV_PANE_FILE" 2>/dev/null || echo "")
-  else
-    PREV_UUID=$(grep '"session_uuid"' "$PREV_PANE_FILE" | sed 's/.*"session_uuid": *"\([^"]*\)".*/\1/' | head -n 1)
-  fi
+  PREV_UUID=$(ai_pane_field "$PREV_PANE_FILE" session_uuid 2>/dev/null || true)
   if [[ -n "$PREV_UUID" && "$PREV_UUID" != "$SESSION_UUID" ]]; then
     echo ""
     echo "WARNING: '$ROLE' was registered to a different pane. Auto-replacing."
@@ -81,16 +80,24 @@ if [[ -f "$PREV_PANE_FILE" ]]; then
   fi
 fi
 
-# Write pane info
-cat > "$MAILBOX/.panes/$ROLE.json" <<EOF
+# Write pane info atomically; paths may contain quotes or backslashes.
+PANE_TMP=$(mktemp "$MAILBOX/.panes/.$ROLE.XXXXXX")
+cat > "$PANE_TMP" <<EOF
 {
   "role": "$ROLE",
+  "terminal": "$TERMINAL_BACKEND",
   "session_uuid": "$SESSION_UUID",
-  "iterm_session_id": "$ITERM_SESSION_ID",
-  "cwd": "$PWD",
+  "iterm_session_id": $(ai_json_quote "${ITERM_SESSION_ID:-}"),
+  "term_session_id": $(ai_json_quote "${TERM_SESSION_ID:-}"),
+  "terminal_tty": "$TERMINAL_TTY",
+  "terminal_window_id": "$TERMINAL_WINDOW_ID",
+  "terminal_owner_pid": "$TERMINAL_OWNER_PID",
+  "terminal_owner_fingerprint": $(ai_json_quote "$TERMINAL_OWNER_FINGERPRINT"),
+  "cwd": $(ai_json_quote "$PWD"),
   "registered_at": "$(date "+%Y-%m-%dT%H:%M:%S%z")"
 }
 EOF
+mv "$PANE_TMP" "$MAILBOX/.panes/$ROLE.json"
 
 echo "Registered '$ROLE' -> session $SESSION_UUID"
 echo "  mailbox: $MAILBOX"
@@ -117,7 +124,7 @@ fi
 rm -f "$WATCH_PID_FILE"
 
 # 起新 watcher
-nohup ai-collab-watch "$ROLE" "$MAILBOX" >> "$WATCH_LOG" 2>&1 &
+nohup "$SCRIPT_DIR/ai-collab-watch" "$ROLE" "$MAILBOX" >> "$WATCH_LOG" 2>&1 &
 WATCH_PID=$!
 echo "$WATCH_PID" > "$WATCH_PID_FILE"
 disown 2>/dev/null || true

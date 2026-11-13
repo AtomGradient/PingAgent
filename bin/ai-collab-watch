@@ -3,6 +3,8 @@
 # 监听 .ai-mailbox/inbox/<role>/ 的新消息文件，用 osascript 把短通知注入本 pane。
 # 通常由 ai-pane-register 自动启动，不需要手动跑。
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/ai-terminal-common.sh"
 
 ROLE="${1:?usage: ai-collab-watch <role> <mailbox>}"
 MAILBOX="${2:?usage: ai-collab-watch <role> <mailbox>}"
@@ -19,12 +21,27 @@ if [[ ! -f "$PANES_FILE" ]]; then
   exit 1
 fi
 
-# 用 jq 抽 session_uuid（如果没 jq 用 grep）
-if command -v jq >/dev/null 2>&1; then
-  SESSION_UUID=$(jq -r .session_uuid "$PANES_FILE")
-else
-  SESSION_UUID=$(grep '"session_uuid"' "$PANES_FILE" | sed 's/.*"session_uuid": *"\([^"]*\)".*/\1/')
-fi
+SESSION_UUID=$(ai_pane_field "$PANES_FILE" session_uuid)
+# Records written before Terminal support have no backend field.
+TERMINAL_BACKEND=$(ai_pane_field "$PANES_FILE" terminal)
+TERMINAL_BACKEND="${TERMINAL_BACKEND:-iterm2}"
+TERMINAL_TTY=""
+TERMINAL_WINDOW_ID=""
+case "$TERMINAL_BACKEND" in
+  iterm2) ;;
+  terminal)
+    TERMINAL_TTY=$(ai_pane_field "$PANES_FILE" terminal_tty)
+    TERMINAL_WINDOW_ID=$(ai_pane_field "$PANES_FILE" terminal_window_id)
+    TERMINAL_OWNER_PID=$(ai_pane_field "$PANES_FILE" terminal_owner_pid)
+    TERMINAL_OWNER_FINGERPRINT=$(ai_pane_field "$PANES_FILE" terminal_owner_fingerprint)
+    if [[ ! "$TERMINAL_TTY" =~ ^/dev/ttys[0-9]+$ || ! "$TERMINAL_WINDOW_ID" =~ ^[0-9]+$ ||
+          ! "$TERMINAL_OWNER_PID" =~ ^[0-9]+$ || -z "$TERMINAL_OWNER_FINGERPRINT" ]]; then
+      echo "Invalid Terminal tab registration in $PANES_FILE; re-run ai-pane-register." >&2
+      exit 1
+    fi
+    ;;
+  *) echo "Unsupported terminal backend: $TERMINAL_BACKEND" >&2; exit 1 ;;
+esac
 
 if [[ -z "$SESSION_UUID" || "$SESSION_UUID" == "null" ]]; then
   echo "Cannot read session_uuid from $PANES_FILE" >&2
@@ -55,11 +72,42 @@ log() {
 INJECT_ERROR=""
 
 inject() {
-  local msg="$1" output exit_code
+  local msg="$1" output exit_code script
+  local -a target_args
 
   INJECT_ERROR=""
-  if output=$("$OSASCRIPT_BIN" \
-    -e '
+  if [[ "$TERMINAL_BACKEND" == "terminal" ]]; then
+    if [[ "$(ai_process_fingerprint "$TERMINAL_OWNER_PID" 2>/dev/null || true)" != "$TERMINAL_OWNER_FINGERPRINT" ]]; then
+      INJECT_ERROR="session_not_found"
+      return 1
+    fi
+    # Terminal's do script sends the text plus CR directly to the tab's PTY,
+    # including when a TUI is running. No focus change or UI keystrokes needed.
+    # Both window ID and TTY must match; never fall back to the selected tab.
+    script='
+on run argv
+  set targetWindow to item 1 of argv as integer
+  set targetTTY to item 2 of argv
+  set targetMsg to item 3 of argv
+  if not (application "Terminal" is running) then return "session not found: " & targetTTY
+  tell application "Terminal"
+    repeat with aWindow in windows
+      if id of aWindow is targetWindow then
+        repeat with aTab in tabs of aWindow
+          if tty of aTab is targetTTY then
+            do script targetMsg in aTab
+            return "ok"
+          end if
+        end repeat
+      end if
+    end repeat
+  end tell
+  return "session not found: " & targetTTY
+end run
+'
+    target_args=("$TERMINAL_WINDOW_ID" "$TERMINAL_TTY" "$msg")
+  else
+    script='
 on run argv
   set targetID to item 1 of argv
   set targetMsg to item 2 of argv
@@ -82,8 +130,10 @@ on run argv
     return "session not found: " & targetID
   end tell
 end run
-' \
-    -- "$SESSION_UUID" "$msg" 2>&1); then
+'
+    target_args=("$SESSION_UUID" "$msg")
+  fi
+  if output=$("$OSASCRIPT_BIN" -e "$script" -- "${target_args[@]}" 2>&1); then
     exit_code=0
   else
     exit_code=$?
@@ -160,7 +210,7 @@ process_file() {
   fi
 }
 
-log "ai-collab-watch starting: role=$ROLE mailbox=$MAILBOX session=$SESSION_UUID"
+log "ai-collab-watch starting: role=$ROLE mailbox=$MAILBOX terminal=$TERMINAL_BACKEND session=$SESSION_UUID"
 
 # 启动时扫描一次（处理 watcher 启动前已到达的消息）
 for f in "$INBOX"/*.md; do

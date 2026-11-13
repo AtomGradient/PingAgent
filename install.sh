@@ -27,7 +27,7 @@ done
 mkdir -p "$BIN_DEST" "$CONF_DIR"
 
 # Install scripts
-for script in ai-pane-register ai-pane-unregister ai-pane-doctor ai-ping ai-collab-watch ai-harness-transport; do
+for script in ai-pane-register ai-pane-unregister ai-pane-doctor ai-ping ai-collab-watch ai-harness-transport ai-terminal-common.sh; do
   src="$BIN_SRC/$script"
   dst="$BIN_DEST/$script"
   if [[ ! -f "$src" ]]; then
@@ -76,7 +76,7 @@ fi
 # osascript check
 if ! command -v osascript >/dev/null 2>&1; then
   echo ""
-  echo "WARNING: osascript not found. PingAgent requires macOS + iTerm2."
+  echo "WARNING: osascript not found. PingAgent requires macOS with iTerm2 or Terminal."
 fi
 
 echo ""
@@ -84,7 +84,7 @@ echo "Next steps:"
 echo "  1) cd <your-project>"
 echo "  2) cp $REPO_ROOT/AGENTS.md ./AGENTS.md   # protocol for the AIs"
 echo "  3) echo '.ai-mailbox/' >> .gitignore"
-echo "  4) In each iTerm2 pane, before starting the AI:"
+echo "  4) In each iTerm2 pane or macOS Terminal tab, before starting the AI:"
 echo "       ai-pane-register codex     # in pane A"
 echo "       ai-pane-register claude    # in pane B"
 echo "  5) Then start codex / claude in each pane respectively."
