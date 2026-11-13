@@ -10,7 +10,7 @@ ROLE="${1:-}"
 if [[ -z "$ROLE" ]]; then
   echo "Usage: ai-pane-register <role>" >&2
   echo "  e.g. ai-pane-register codex" >&2
-  echo "       ai-pane-register claude" >&2
+  echo "       ai-pane-register antigravity" >&2
   exit 1
 fi
 

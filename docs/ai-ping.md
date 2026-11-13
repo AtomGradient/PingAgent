@@ -2,6 +2,8 @@
 
 同一个 Agent-facing CLI 支持两种明确隔离的运行模式：普通项目中写入 legacy `.ai-mailbox/`，watcher 再注入对方 pane；由 EdgeStudio Harness 启动的 Scenario participant 中，将 send/reply intent 交回权威 Host，不创建或回退到 legacy mailbox。
 
+> **模型使用提示**：我们不太建议使用Anthropic的任何模型，因为我们发现它会在背后故意诱导实验结果。
+
 ## 命令签名
 
 ```
@@ -24,19 +26,19 @@ sender identity 不来自 `<to>`、`--from` 或环境变量字符串，而由 Ho
 
 ```bash
 # 短消息（仅适合一句话；带特殊字符要 quote）
-ai-ping claude "审一下 src/auth.ts"
+ai-ping antigravity "审一下 src/auth.ts"
 
 # 长内容 / 带代码块 —— 推荐
-ai-ping claude --kind review-request --file /tmp/req.md
+ai-ping antigravity --kind review-request --file /tmp/req.md
 
 # 回复某条消息（必须带 --reply-to，对方才能闭环）
 ai-ping codex --reply-to 20260511-153000-abc123 --file /tmp/reply.md
 
 # 阻塞等回复（codex 写完想直接拿到 review 再继续）
-ai-ping claude --wait --timeout 600 --file /tmp/q.md
+ai-ping antigravity --wait --timeout 600 --file /tmp/q.md
 
 # stdin pipe
-cat req.md | ai-ping claude --kind review-request
+cat req.md | ai-ping antigravity --kind review-request
 
 # 只读排障自检
 ai-ping doctor
@@ -72,12 +74,12 @@ ai-ping doctor
 ```
 [发送方 pane]                  [文件系统]                  [接收方 pane]
 
-ai-ping claude "..."   ─►   inbox/claude/<id>.md
+ai-ping antigravity "..."  ─►  inbox/antigravity/<id>.md
                                   │
-                                  │  watcher (fswatch) 监听 inbox/claude/
+                                  │  watcher (fswatch) 监听 inbox/antigravity/
                                   │
                                   ▼
-                            osascript 用 .panes/claude.json 里的
+                            osascript 用 .panes/antigravity.json 里的
                             终端类型和会话目标注入到对方 pane
                                   │
                                   ▼
@@ -115,7 +117,7 @@ watcher 只有在 osascript 以 0 退出且返回精确 `ok` 时才写 `<msg>.md
 
 ## --wait 语义
 
-`ai-ping claude --wait --timeout 600 --file /tmp/q.md`：
+`ai-ping antigravity --wait --timeout 600 --file /tmp/q.md`：
 
 1. 写消息文件，记下本次 `msg_id`
 2. watcher 立即注入对方 pane
@@ -125,7 +127,7 @@ watcher 只有在 osascript 以 0 退出且返回精确 `ok` 时才写 `<msg>.md
 
 **重要**：
 - 对方必须用 `--reply-to <id>` 回，否则解锁不了
-- 如果在 Claude Code Bash tool 里用 `--wait`，记得把 Bash tool 的 `timeout` 也设大（最大 600000 ms）
+- 如果在 Google Antigravity（`agy`）等终端 Agent 工具里用 `--wait`，注意工具自身的等待超时或后台任务机制（避免长等待被提前中断）
 - **不要双方同时 `--wait` —— 会互锁**
 
 ## 常见错误
@@ -173,11 +175,11 @@ cat > /tmp/review-req.md <<'EOF'
 - 用了 actor 而不是 NSLock，因为 actor 在 swift 6 strict concurrency 下更安全
 EOF
 
-ai-ping claude --kind review-request --file /tmp/review-req.md
-# 输出：Sent: 20260511-153000-abc123  (codex -> claude, kind=review-request)
+ai-ping antigravity --kind review-request --file /tmp/review-req.md
+# 输出：Sent: 20260511-153000-abc123  (codex -> antigravity, kind=review-request)
 ```
 
-**接收方（claude）** 看到通知 → Read inbox 文件 → 实际审核（可能 Read 相关源码 + Bash 跑测试）→ 
+**接收方（antigravity）** 看到通知 → Read inbox 文件 → 实际审核（可能 Read 相关源码 + Bash 跑测试）→ 
 
 ```bash
 cat > /tmp/review.md <<'EOF'
@@ -205,16 +207,16 @@ ai-ping codex --kind review-response --reply-to 20260511-153000-abc123 --file /t
 <project>/.ai-mailbox/
 ├── .panes/
 │   ├── codex.json              # 终端类型 + 会话身份/目标 + cwd + 时间戳
-│   └── claude.json
+│   └── antigravity.json
 ├── inbox/
 │   ├── codex/<msg-id>.md       # 给 codex 的消息
 │   ├── codex/<msg-id>.md.dispatched   # watcher 去重标记
-│   └── claude/<msg-id>.md
+│   └── antigravity/<msg-id>.md
 ├── sent/<msg-id>.md            # 自己发出的副本（audit log）
 ├── .watch-codex.pid            # watcher PID
 ├── .watch-codex.log            # watcher 日志（osascript ok/error 都在这）
-├── .watch-claude.pid
-└── .watch-claude.log
+├── .watch-antigravity.pid
+└── .watch-antigravity.log
 ```
 
 调试时最有用的两个文件：`.watch-<role>.log`（看 `delivery confirmed` 或分类后的 `reason=`）+ `inbox/<role>/<id>.md`（看消息内容是否对）。运行 `./tests/test-ai-collab-watch.sh` 和 `python3 -m pytest -q tests/test-terminal-support.py` 可验证两种终端的注册和派发，不会触碰真实终端。

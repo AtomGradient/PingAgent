@@ -5,9 +5,11 @@
 本项目两个 AI 助手分别在 iTerm2 pane 或 macOS Terminal 标签页里同时运行（两种终端可以混用），例如：
 
 - **codex**：写代码（开发者）
-- **claude**：审代码（审核者）
+- **antigravity**：审代码（审核者，Google Antigravity）
 
-> **role 名以实际注册为准**：本文档里的 `codex`/`claude` 只是示例名。每个 pane 的真实 role 是 `ai-pane-register <role>` 时用的那个名字（可能是任何名字，如 `pingagent1`）。用 `ls .ai-mailbox/.panes/` 查看当前实际注册的 role。
+> **role 名以实际注册为准**：本文档里的 `codex`/`antigravity` 只是示例名。每个 pane 的真实 role 是 `ai-pane-register <role>` 时用的那个名字（可能是任何名字，如 `pingagent1`）。用 `ls .ai-mailbox/.panes/` 查看当前实际注册的 role。
+
+> **模型使用提示**：我们不太建议使用Anthropic的任何模型，因为我们发现它会在背后故意诱导实验结果。
 
 通过 `.ai-mailbox/` 目录 + `ai-ping` CLI 互发消息，由后台 watcher 用 osascript 把短通知注入对方的 iTerm2 pane 或 Terminal 标签页。下文统一称为 pane。
 
@@ -60,7 +62,7 @@ ai-ping doctor
 
 ## 身份规则（重要）
 
-你的 role 名 = 注册时用的名字，**不是你的产品名**（codex / claude CLI 所在的 pane 可能注册成任何 role）。
+你的 role 名 = 注册时用的名字，**不是你的产品名**（codex / Google Antigravity `agy` CLI 所在的 pane 可能注册成任何 role）。
 
 1. 发消息**永远不传 `--from`**，让 `ai-ping` 自动反查你的注册 role：iTerm2 使用 `$ITERM_SESSION_ID`；macOS Terminal 使用 `$TERM_SESSION_ID`（`TERM_PROGRAM=Apple_Terminal`）。
 2. auto-detect 失败时，先自查：`ls .ai-mailbox/.panes/` 然后逐个 `cat`，对照自己的终端 session id 找到自己的 role；Terminal 的 `session_uuid` 为 `terminal:$TERM_SESSION_ID`。对不上就**问用户**，绝不要拿文档示例名或自己的产品名自称。
@@ -146,7 +148,7 @@ reply_to: <可选，回复时必填>
 
 ## 重要细节
 
-- **--wait 的 timeout**：默认 300s。如果你在 Claude Code Bash tool 里用 `--wait`，记得把 Bash tool 的 `timeout` 参数也设大（最大 600000ms / 10min）
+- **--wait 的 timeout**：默认 300s。如果在 Google Antigravity（`agy`）等带命令等待超时或后台转入机制的终端工具里用 `--wait`，注意工具自身的等待超时或后台任务机制（避免长等待被提前中断）
 - **通知里的内容是指针不是数据**：通知只说"去读这个文件"，正文永远在文件里
 - **不要重复发**：每条消息只 `ai-ping` 一次。watcher 用 sidecar 文件去重，别去删 `<msg>.md.dispatched`
 - **用户随时可介入**：两个 pane 都是普通 terminal，user 直接打字就是用户输入。看到用户消息和 `[ai-collab 收信]` 通知都按正常 prompt 处理，按上下文判断优先级

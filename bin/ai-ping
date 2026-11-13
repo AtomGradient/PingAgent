@@ -8,7 +8,7 @@ usage() {
 Usage: ai-ping <to> [options] [<message words...>]
 
 Required:
-  <to>                 目标 role (e.g. claude, codex)
+  <to>                 目标 role (e.g. antigravity, codex)
 
 Options:
   --file <path>        从文件读消息正文（推荐：长内容/带代码块）
@@ -23,10 +23,10 @@ Diagnostics:
   ai-ping doctor       只读诊断当前项目的 mailbox / 注册 / watcher 状态
 
 示例：
-  ai-ping claude "请审核 src/auth.ts 的并发"
-  ai-ping claude --kind review-request --file /tmp/req.md
+  ai-ping antigravity "请审核 src/auth.ts 的并发"
+  ai-ping antigravity --kind review-request --file /tmp/req.md
   ai-ping codex --kind review-response --reply-to 20260511-153000-abc123 --file /tmp/review.md
-  ai-ping claude --wait --timeout 600 -- "blocking question"
+  ai-ping antigravity --wait --timeout 600 -- "blocking question"
 EOF
   exit 1
 }

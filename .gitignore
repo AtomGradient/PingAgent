@@ -11,7 +11,7 @@
 .ai-mailbox/
 
 # Local protocol aliases / scratch files
-CLAUDE.md
+GEMINI.md
 *.tmp
 *.bak
 
