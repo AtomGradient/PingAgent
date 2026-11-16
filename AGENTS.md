@@ -2,7 +2,7 @@
 
 > 本文件 **既是给 AI 看的协议说明，也是给人看的使用手册**。把它复制到你项目的根目录后，两个 AI 都会读到这份说明，按里面的约定互发消息。
 
-本项目两个 AI 助手分别在 iTerm2 pane 或 macOS Terminal 标签页里同时运行（两种终端可以混用），例如：
+本项目两个 AI 助手分别在 iTerm2、macOS Terminal 或 Ghostty pane 里同时运行（三种终端可以混用；Ghostty 需要 macOS 版 1.4.0+），例如：
 
 - **codex**：写代码（开发者）
 - **antigravity**：审代码（审核者，Google Antigravity）
@@ -11,7 +11,7 @@
 
 > **模型使用提示**：我们不太建议使用Anthropic的任何模型，因为我们发现它会在背后故意诱导实验结果。
 
-通过 `.ai-mailbox/` 目录 + `ai-ping` CLI 互发消息，由后台 watcher 用 osascript 把短通知注入对方的 iTerm2 pane 或 Terminal 标签页。下文统一称为 pane。
+通过 `.ai-mailbox/` 目录 + `ai-ping` CLI 互发消息，由后台 watcher 用 osascript 把短通知注入对方的 iTerm2、Terminal 或 Ghostty pane。下文统一称为 pane。
 
 ---
 
@@ -64,8 +64,8 @@ ai-ping doctor
 
 你的 role 名 = 注册时用的名字，**不是你的产品名**（codex / Google Antigravity `agy` CLI 所在的 pane 可能注册成任何 role）。
 
-1. 发消息**永远不传 `--from`**，让 `ai-ping` 自动反查你的注册 role：iTerm2 使用 `$ITERM_SESSION_ID`；macOS Terminal 使用 `$TERM_SESSION_ID`（`TERM_PROGRAM=Apple_Terminal`）。
-2. auto-detect 失败时，先自查：`ls .ai-mailbox/.panes/` 然后逐个 `cat`，对照自己的终端 session id 找到自己的 role；Terminal 的 `session_uuid` 为 `terminal:$TERM_SESSION_ID`。对不上就**问用户**，绝不要拿文档示例名或自己的产品名自称。
+1. 发消息**永远不传 `--from`**，让 `ai-ping` 自动反查你的注册 role：iTerm2 使用 `$ITERM_SESSION_ID`；macOS Terminal 使用 `$TERM_SESSION_ID`（`TERM_PROGRAM=Apple_Terminal`）；Ghostty 使用 `$GHOSTTY_SURFACE_ID`（`TERM_PROGRAM=ghostty`）。
+2. auto-detect 失败时，先自查：`ls .ai-mailbox/.panes/` 然后逐个 `cat`，对照自己的终端 session id 找到自己的 role；Terminal 的 `session_uuid` 为 `terminal:$TERM_SESSION_ID`，Ghostty 的为 `ghostty:$GHOSTTY_SURFACE_ID`（不是 AppleScript 终端 UUID）。对不上就**问用户**，绝不要拿文档示例名或自己的产品名自称。
 3. 伪装 `--from` 的代价：对方按消息 frontmatter 的 `from` 回信，回信会进没有 watcher 的 inbox，你永远收不到通知（回信黑洞）。`ai-ping` 检测到「显式 `--from` ≠ 本 pane 注册 role」会打 warning——看到 warning 就停下，改用真实 role 重发。
 
 ---
@@ -81,6 +81,8 @@ ai-ping doctor
 5. 只有没有任何注册信息可用时，才退回最近的 `.ai-mailbox/`。
 
 正确姿势：两个 pane 都在**同一个项目根目录**运行 `ai-pane-register <role>`。如果子目录也有 `.ai-mailbox/`，它可能是独立协作会话，也可能是残留；不确定时先跑 `ai-ping doctor`。
+
+Ghostty 请在启动 AI 前直接从原生 pane 的 shell 注册（不要在 tmux/screen 或 AI 的工具子进程中注册）。保持 `macos-applescript` 启用并允许自动化控制 Ghostty；升级后打开新 pane，重启或关闭重开后重新注册。
 
 ---
 

@@ -76,7 +76,7 @@ fi
 # osascript check
 if ! command -v osascript >/dev/null 2>&1; then
   echo ""
-  echo "WARNING: osascript not found. PingAgent requires macOS with iTerm2 or Terminal."
+  echo "WARNING: osascript not found. PingAgent requires macOS with iTerm2, Terminal, or Ghostty 1.4.0+."
 fi
 
 echo ""
@@ -84,7 +84,7 @@ echo "Next steps:"
 echo "  1) cd <your-project>"
 echo "  2) cp $REPO_ROOT/AGENTS.md ./AGENTS.md   # protocol for the AIs"
 echo "  3) echo '.ai-mailbox/' >> .gitignore"
-echo "  4) In each iTerm2 pane or macOS Terminal tab, before starting the AI:"
+echo "  4) In each iTerm2, Terminal, or Ghostty pane, before starting the AI:"
 echo "       ai-pane-register codex        # in pane A"
 echo "       ai-pane-register antigravity  # in pane B"
 echo "  5) Then start codex / agy (Google Antigravity) in each pane respectively."

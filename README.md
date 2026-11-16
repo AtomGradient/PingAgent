@@ -2,7 +2,7 @@
 
 # PingAgent
 
-> Make AI agents in iTerm2 panes or macOS Terminal tabs (e.g. Codex + Google Antigravity) talk to each other on demand: one writes code, the other reviews — without you copy-pasting between panes. Both terminal apps can participate in the same mailbox.
+> Make AI agents in iTerm2, macOS Terminal, or Ghostty panes (e.g. Codex + Google Antigravity) talk to each other on demand: one writes code, the other reviews — without you copy-pasting between panes. All three terminal apps can participate in the same mailbox.
 
 > [!WARNING]
 > **Model Notice:** We do not recommend using any Anthropic models, as we have found that they deliberately steer experimental results behind the scenes.
@@ -34,7 +34,7 @@
 
 ## Requirements
 
-- macOS with iTerm2 or the built-in Terminal app (uses `osascript` to locate and notify sessions)
+- macOS with iTerm2, the built-in Terminal app, or Ghostty 1.4.0+ (uses `osascript` to locate and notify sessions)
 - bash 3.2+ (system bash on macOS works)
 - `jq` (optional: `brew install jq`; a simple field parser is used otherwise)
 - `fswatch` (optional — falls back to 1 s polling otherwise; recommended: `brew install fswatch`)
@@ -76,7 +76,7 @@ ln -sf AGENTS.md GEMINI.md
 echo '.ai-mailbox/' >> .gitignore
 ```
 
-### Every time you open a new iTerm2 pane or Terminal tab
+### Every time you open a new iTerm2, Terminal, or Ghostty pane
 
 **Pane A (Codex):**
 ```bash
@@ -93,13 +93,15 @@ agy                  # launch Google Antigravity CLI
 ```
 
 `ai-pane-register` does three things:
-1. Detects the terminal and saves its identity and delivery target into `.ai-mailbox/.panes/<role>.json`: the UUID from `$ITERM_SESSION_ID` for iTerm2, or `$TERM_SESSION_ID` plus window ID, TTY, and session process for Terminal
+1. Detects the terminal and saves its identity and delivery target into `.ai-mailbox/.panes/<role>.json`: the UUID from `$ITERM_SESSION_ID` for iTerm2; `$TERM_SESSION_ID` plus window ID, TTY, and session process for Terminal; `$GHOSTTY_SURFACE_ID` plus AppleScript terminal ID, TTY, and session process for Ghostty
 2. Starts `ai-collab-watch <role>` in the background (log: `.ai-mailbox/.watch-<role>.log`)
 3. Cleans up any old watcher for the same role+mailbox, then starts a fresh watcher
 
 Run `ai-pane-register` from the project root. If an ancestor directory already has `.ai-mailbox/`, `ai-pane-register` warns that the current command will use or create a nested mailbox; in most cases you should `cd` back to the ancestor project root instead.
 
 In Terminal, register two tabs with `ai-pane-register terminal_one` and `ai-pane-register terminal_two`, then start the AIs. Register directly in each tab's shell. AI child processes can identify the sender through inherited `$TERM_PROGRAM` / `$TERM_SESSION_ID` even without a TTY. If macOS asks for Automation permission during registration or delivery, allow the caller to control Terminal.
+
+In Ghostty, run `ai-pane-register ghostty_one` and `ai-pane-register ghostty_two` directly in two panes before starting the AIs. Ghostty 1.4.0+ supplies `$GHOSTTY_SURFACE_ID`, so AI child processes can identify the sender even without a TTY. Registration maps the pane's TTY to its separate AppleScript terminal UUID. Keep `macos-applescript` enabled (the default) and allow Automation access to Ghostty if prompted. After upgrading Ghostty, open new panes before registering. See the [Ghostty 1.4 release notes](https://ghostty.org/docs/install/release-notes/1-4-0) and [AppleScript documentation](https://ghostty.org/docs/features/applescript).
 
 **When you're done with a pane** (optional cleanup):
 
@@ -170,6 +172,7 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 - **`.dispatched` sidecar dedup**: created only after osascript explicitly returns `ok`; `session not found`, Automation `-1743`, and unknown responses remain undispatched
 - **A sidecar is not a consumption receipt**: it only means the target terminal accepted the injection. Use a peer reply or explicit receipt to prove that the AI read and handled it. Empty sidecars created by older versions cannot retroactively prove delivery
 - **Terminal targeting**: notifications require the registered window ID and TTY, without changing focus. The session process's start time and TTY are checked before delivery to guard against TTY reuse after closing a tab. Re-register after moving a tab to another window or restarting Terminal
+- **Ghostty targeting**: the inherited core surface ID identifies the sender; delivery requires the registered AppleScript terminal UUID and TTY, with the same session process check. Text and Enter are sent separately to submit correctly in TUIs. Re-register after closing/reopening a pane or restarting Ghostty. This backend supports macOS Ghostty 1.4.0+; older releases lack the inherited identity needed by AI child processes
 - **Harness typed transport**: `ai-harness-transport` accepts only an exact iTerm session already resolved and fenced by Harness. It does not resolve roles, choose a mailbox, or write `.dispatched`; it returns redacted structured transport evidence only after exact-session injection returns `ok`. Harness Host still validates policy routing, delivery ACK, and consumption ACK.
 - **Harness participant mode**: A Harness-launched participant keeps using `ai-ping <to>` and `--reply-to <delivery-id>`, but the intent returns to Host through a Host-issued scoped context. Host authenticates the sender with the local IPC peer PID and the exact owned descendant process chain. Once Host durably persists the route/envelope, the command returns a compact `accepted` result; Host independently supervises dispatch, delivery/consumption ACKs, retry, and restart recovery. Normal ACKs stay in machine state/UI/audit instead of being reinjected as “peer received it” Agent messages, triggering model inference, or creating ACK loops. This mode rejects `--from`, never writes or falls back to a legacy mailbox, and leaves explicit waiting/querying to the Host delivery read model instead of legacy `--wait`.
 - **Atomic write**: `mktemp + mv`, watcher never sees half-written files
@@ -192,6 +195,12 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 **`session not found`**:
 - iTerm2 was restarted, or the pane changed. No `.dispatched` sidecar is written; re-run `ai-pane-register <role>` in the new pane to retry
 - Terminal also leaves messages undispatched when the tab closes, moves to another window, or its session process exits. Re-run `ai-pane-register <role>` in the intended tab
+- Ghostty leaves messages undispatched when the registered terminal or session process is gone. Re-run `ai-pane-register <role>` in the intended pane
+
+**`GHOSTTY_SURFACE_ID is missing or invalid` / `Cannot locate Ghostty pane`:**
+- Use macOS Ghostty 1.4.0+, open a new pane after upgrading, and register directly in that pane's shell before launching the AI
+- Check that the AI inherits `$TERM_PROGRAM=ghostty` and `$GHOSTTY_SURFACE_ID`. Keep `macos-applescript` enabled and allow Automation access to Ghostty
+- Register in a native Ghostty pane, outside tmux/screen; registration needs the pane's own TTY
 
 **Terminal still reports `ITERM_SESSION_ID not set`:**
 - The command is from an older installation. Check `command -v ai-pane-register`, then run `./install.sh` in this repository to update the links (or `./install.sh --copy` for a copy installation)
@@ -226,7 +235,7 @@ python3 -m pytest -q \
 ./tests/test-ai-collab-watch.sh
 ```
 
-The regression suite covers Terminal registration and cleanup, mixed-terminal messages, piped input, nested mailboxes, doctor, TTY reuse protection, delivery success/failure, Automation `-1743`, and sidecar deduplication. It uses local osascript/fswatch test doubles and never injects text into real terminals. Install pytest first, or run the Python tests with `uv run --with pytest python -m pytest -q tests/`.
+The regression suite covers Terminal and Ghostty registration and cleanup, messages between all three terminal apps, inherited sender identity without a TTY, piped input, nested mailboxes, doctor, TTY reuse protection, delivery success/failure, Automation `-1743`, and sidecar deduplication. It uses local osascript/fswatch test doubles and never injects text into real terminals. Install pytest first, or run the Python tests with `uv run --with pytest python -m pytest -q tests/test-*.py`.
 
 ## Protocol doc (for the AIs)
 

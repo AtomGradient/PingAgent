@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ai-pane-register <role>
-# 注册当前 iTerm2 pane / macOS Terminal tab，并启动 watcher。
+# 注册当前 iTerm2 / macOS Terminal / Ghostty pane，并启动 watcher。
 # 在每个 pane 启动两个 AI 之前各跑一次。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,8 +32,11 @@ TERMINAL_TTY=""
 TERMINAL_WINDOW_ID=""
 TERMINAL_OWNER_PID=""
 TERMINAL_OWNER_FINGERPRINT=""
+GHOSTTY_TERMINAL_ID=""
 if [[ "$TERMINAL_BACKEND" == "terminal" ]]; then
   ai_resolve_terminal_tab
+elif [[ "$TERMINAL_BACKEND" == "ghostty" ]]; then
+  ai_resolve_ghostty_terminal
 fi
 
 find_parent_mailbox() {
@@ -89,6 +92,8 @@ cat > "$PANE_TMP" <<EOF
   "session_uuid": "$SESSION_UUID",
   "iterm_session_id": $(ai_json_quote "${ITERM_SESSION_ID:-}"),
   "term_session_id": $(ai_json_quote "${TERM_SESSION_ID:-}"),
+  "ghostty_surface_id": $(ai_json_quote "${GHOSTTY_SURFACE_ID:-}"),
+  "ghostty_terminal_id": "$GHOSTTY_TERMINAL_ID",
   "terminal_tty": "$TERMINAL_TTY",
   "terminal_window_id": "$TERMINAL_WINDOW_ID",
   "terminal_owner_pid": "$TERMINAL_OWNER_PID",

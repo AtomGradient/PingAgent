@@ -10,6 +10,9 @@ case "${FAKE_OSASCRIPT_MODE:-success}" in
   terminal_registration)
     printf '42\n'
     ;;
+  ghostty_registration)
+    printf '%s\n' "${FAKE_GHOSTTY_TERMINAL_ID:-B36E598A-A1F3-41F7-A753-128CA5A4A351}"
+    ;;
   success)
     printf 'ok\n'
     ;;

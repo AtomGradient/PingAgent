@@ -5,7 +5,16 @@ ai_detect_terminal() {
   TERMINAL_BACKEND=""
   SESSION_UUID=""
   SESSION_ERROR=""
-  if [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]]; then
+  if [[ "${TERM_PROGRAM:-}" == "ghostty" ]]; then
+    TERMINAL_BACKEND="ghostty"
+    # Ghostty 1.4+ exports a core surface ID. It is NOT the UUID exposed
+    # by its macOS AppleScript terminal object; resolve that at registration.
+    if ai_valid_ghostty_surface_id "${GHOSTTY_SURFACE_ID:-}"; then
+      SESSION_UUID="ghostty:$GHOSTTY_SURFACE_ID"
+    else
+      SESSION_ERROR="GHOSTTY_SURFACE_ID is missing or invalid. Use macOS Ghostty 1.4.0+ and open a new pane after upgrading."
+    fi
+  elif [[ "${TERM_PROGRAM:-}" == "Apple_Terminal" ]]; then
     TERMINAL_BACKEND="terminal"
     if [[ "${TERM_SESSION_ID:-}" =~ ^[a-zA-Z0-9._:-]+$ ]]; then
       # Children of an AI may have a different (or no) controlling TTY. Use
@@ -22,8 +31,16 @@ ai_detect_terminal() {
       SESSION_ERROR="Cannot parse UUID from ITERM_SESSION_ID. Run from an iTerm2 pane."
     fi
   else
-    SESSION_ERROR="No supported terminal session found. Run from an iTerm2 pane or macOS Terminal tab."
+    SESSION_ERROR="No supported terminal session found. Run from iTerm2, macOS Terminal, or macOS Ghostty 1.4.0+."
   fi
+}
+
+ai_valid_ghostty_surface_id() {
+  [[ "$1" =~ ^0x[0-9a-f]{16}$ && "$1" != "0x0000000000000000" ]]
+}
+
+ai_valid_ghostty_terminal_id() {
+  [[ "$1" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]
 }
 
 ai_pane_field() {
@@ -50,14 +67,13 @@ ai_process_fingerprint() {
   LC_ALL=C ps -p "$1" -o lstart= -o tty= | awk '{$1=$1; print}'
 }
 
-ai_resolve_terminal_tab() {
-  local terminal_device output osascript_bin owner_pid parent_info parent_pid parent_tty
-  osascript_bin="${AI_COLLAB_OSASCRIPT_BIN:-/usr/bin/osascript}"
+ai_resolve_terminal_process() {
+  local label="$1" terminal_device owner_pid parent_info parent_pid parent_tty
   # ps works even when stdin is piped. Registration must run in the actual
-  # Terminal tab, before launching the AI, not in a tool-created pseudo-TTY.
+  # terminal, before launching the AI, not in a tool-created pseudo-TTY.
   terminal_device=$(ps -p $$ -o tty= | tr -d '[:space:]')
   if [[ ! "$terminal_device" =~ ^ttys[0-9]+$ ]]; then
-    echo "Cannot determine this Terminal tab's TTY. Run ai-pane-register directly in Terminal." >&2
+    echo "Cannot determine this $label's TTY. Run ai-pane-register directly in its shell." >&2
     return 1
   fi
   TERMINAL_TTY="/dev/$terminal_device"
@@ -75,14 +91,20 @@ ai_resolve_terminal_tab() {
     owner_pid="$parent_pid"
   done
   if [[ -z "$TERMINAL_OWNER_PID" ]]; then
-    echo "Cannot identify this Terminal tab's session process. Run ai-pane-register directly in Terminal." >&2
+    echo "Cannot identify this $label's session process. Run ai-pane-register directly in its shell." >&2
     return 1
   fi
   TERMINAL_OWNER_FINGERPRINT=$(ai_process_fingerprint "$TERMINAL_OWNER_PID")
   if [[ -z "$TERMINAL_OWNER_FINGERPRINT" ]]; then
-    echo "Terminal session process exited during registration; re-run ai-pane-register." >&2
+    echo "$label session process exited during registration; re-run ai-pane-register." >&2
     return 1
   fi
+}
+
+ai_resolve_terminal_tab() {
+  local output osascript_bin
+  osascript_bin="${AI_COLLAB_OSASCRIPT_BIN:-/usr/bin/osascript}"
+  ai_resolve_terminal_process "Terminal tab" || return 1
   if ! output=$("$osascript_bin" -e '
 on run argv
   set targetTTY to item 1 of argv
@@ -106,4 +128,35 @@ end run
     return 1
   fi
   TERMINAL_WINDOW_ID="$output"
+}
+
+ai_resolve_ghostty_terminal() {
+  local output osascript_bin
+  osascript_bin="${AI_COLLAB_OSASCRIPT_BIN:-/usr/bin/osascript}"
+  ai_resolve_terminal_process "Ghostty pane" || return 1
+  # The inherited core surface ID identifies senders without a TTY. The
+  # AppleScript UUID identifies delivery targets. Bind the two using this
+  # pane's TTY, never its title, working directory, or current focus.
+  if ! output=$("$osascript_bin" -e '
+on run argv
+  set targetTTY to item 1 of argv
+  if not (application "Ghostty" is running) then return "session not found"
+  tell application "Ghostty"
+    repeat with aTerminal in terminals
+      if tty of aTerminal is targetTTY then return (id of aTerminal) as text
+    end repeat
+  end tell
+  return "session not found"
+end run
+' -- "$TERMINAL_TTY" 2>&1); then
+    echo "Cannot locate Ghostty pane: $output" >&2
+    echo "Use macOS Ghostty 1.4.0+ with macos-applescript enabled; allow Automation access to Ghostty in System Settings." >&2
+    return 1
+  fi
+  if ! ai_valid_ghostty_terminal_id "$output"; then
+    echo "Cannot locate Ghostty pane for $TERMINAL_TTY: $output" >&2
+    echo "Run ai-pane-register directly in a Ghostty pane with macos-applescript enabled." >&2
+    return 1
+  fi
+  GHOSTTY_TERMINAL_ID="$output"
 }

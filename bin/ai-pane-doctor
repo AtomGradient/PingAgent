@@ -135,7 +135,7 @@ fi
 
 # 2. Current terminal session registration.
 if [[ -z "$SESSION_UUID" ]]; then
-  print_result FAIL "2 current session" "$SESSION_ERROR" "run from the registered iTerm2 pane or Terminal tab; do not guess --from"
+  print_result FAIL "2 current session" "$SESSION_ERROR" "run from the registered iTerm2, Terminal, or Ghostty pane; do not guess --from"
 elif [[ -z "$SELECTED_ROLE" ]]; then
   print_result FAIL "2 current session" "session $SESSION_UUID is not registered in any upward mailbox" "run ai-pane-register <role> from the intended project root"
 else

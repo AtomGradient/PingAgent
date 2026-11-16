@@ -29,15 +29,30 @@ TERMINAL_TTY=""
 TERMINAL_WINDOW_ID=""
 case "$TERMINAL_BACKEND" in
   iterm2) ;;
-  terminal)
+  terminal|ghostty)
     TERMINAL_TTY=$(ai_pane_field "$PANES_FILE" terminal_tty)
-    TERMINAL_WINDOW_ID=$(ai_pane_field "$PANES_FILE" terminal_window_id)
     TERMINAL_OWNER_PID=$(ai_pane_field "$PANES_FILE" terminal_owner_pid)
     TERMINAL_OWNER_FINGERPRINT=$(ai_pane_field "$PANES_FILE" terminal_owner_fingerprint)
-    if [[ ! "$TERMINAL_TTY" =~ ^/dev/ttys[0-9]+$ || ! "$TERMINAL_WINDOW_ID" =~ ^[0-9]+$ ||
+    if [[ ! "$TERMINAL_TTY" =~ ^/dev/ttys[0-9]+$ ||
           ! "$TERMINAL_OWNER_PID" =~ ^[0-9]+$ || -z "$TERMINAL_OWNER_FINGERPRINT" ]]; then
-      echo "Invalid Terminal tab registration in $PANES_FILE; re-run ai-pane-register." >&2
+      echo "Invalid $TERMINAL_BACKEND session registration in $PANES_FILE; re-run ai-pane-register." >&2
       exit 1
+    fi
+    if [[ "$TERMINAL_BACKEND" == "terminal" ]]; then
+      TERMINAL_WINDOW_ID=$(ai_pane_field "$PANES_FILE" terminal_window_id)
+      if [[ ! "$TERMINAL_WINDOW_ID" =~ ^[0-9]+$ ]]; then
+        echo "Invalid Terminal tab registration in $PANES_FILE; re-run ai-pane-register." >&2
+        exit 1
+      fi
+    else
+      GHOSTTY_SURFACE_ID=$(ai_pane_field "$PANES_FILE" ghostty_surface_id)
+      GHOSTTY_TERMINAL_ID=$(ai_pane_field "$PANES_FILE" ghostty_terminal_id)
+      if ! ai_valid_ghostty_surface_id "$GHOSTTY_SURFACE_ID" ||
+         ! ai_valid_ghostty_terminal_id "$GHOSTTY_TERMINAL_ID" ||
+         [[ "$SESSION_UUID" != "ghostty:$GHOSTTY_SURFACE_ID" ]]; then
+        echo "Invalid Ghostty pane registration in $PANES_FILE; re-run ai-pane-register." >&2
+        exit 1
+      fi
     fi
     ;;
   *) echo "Unsupported terminal backend: $TERMINAL_BACKEND" >&2; exit 1 ;;
@@ -76,11 +91,13 @@ inject() {
   local -a target_args
 
   INJECT_ERROR=""
-  if [[ "$TERMINAL_BACKEND" == "terminal" ]]; then
+  if [[ "$TERMINAL_BACKEND" == "terminal" || "$TERMINAL_BACKEND" == "ghostty" ]]; then
     if [[ "$(ai_process_fingerprint "$TERMINAL_OWNER_PID" 2>/dev/null || true)" != "$TERMINAL_OWNER_FINGERPRINT" ]]; then
       INJECT_ERROR="session_not_found"
       return 1
     fi
+  fi
+  if [[ "$TERMINAL_BACKEND" == "terminal" ]]; then
     # Terminal's do script sends the text plus CR directly to the tab's PTY,
     # including when a TUI is running. No focus change or UI keystrokes needed.
     # Both window ID and TTY must match; never fall back to the selected tab.
@@ -106,6 +123,29 @@ on run argv
 end run
 '
     target_args=("$TERMINAL_WINDOW_ID" "$TERMINAL_TTY" "$msg")
+  elif [[ "$TERMINAL_BACKEND" == "ghostty" ]]; then
+    # Ghostty's input text is a paste. Submit with a separate key event so
+    # bracketed-paste-aware TUIs treat Enter as submission, not pasted text.
+    script='
+on run argv
+  set targetID to item 1 of argv
+  set targetTTY to item 2 of argv
+  set targetMsg to item 3 of argv
+  if not (application "Ghostty" is running) then return "session not found: " & targetID
+  tell application "Ghostty"
+    repeat with aTerminal in terminals
+      if id of aTerminal is targetID and tty of aTerminal is targetTTY then
+        input text targetMsg to aTerminal
+        delay 0.05
+        send key "enter" to aTerminal
+        return "ok"
+      end if
+    end repeat
+  end tell
+  return "session not found: " & targetID
+end run
+'
+    target_args=("$GHOSTTY_TERMINAL_ID" "$TERMINAL_TTY" "$msg")
   else
     script='
 on run argv

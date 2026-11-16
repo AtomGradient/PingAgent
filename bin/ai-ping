@@ -323,6 +323,7 @@ if [[ -z "$FROM" ]]; then
     echo "Cannot auto-detect --from in any .ai-mailbox upward from $PWD. Either:" >&2
     echo "  1) run ai-pane-register <role> first, or" >&2
     echo "  2) pass --from <role> explicitly" >&2
+    [[ -z "$SESSION_ERROR" ]] || echo "  $SESSION_ERROR" >&2
     echo "" >&2
     echo "Mailbox candidates found:" >&2
     print_mailbox_candidates

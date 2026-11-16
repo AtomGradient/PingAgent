@@ -2,7 +2,7 @@
 
 # PingAgent
 
-> 让 iTerm2 pane 或 macOS 自带 Terminal 标签页里的 AI 助手（如 Codex 与 Google Antigravity）按需自动互发消息：一边写代码、一边审代码，不用你手动 copy-paste。两种终端可以混用。
+> 让 iTerm2、macOS 自带 Terminal 或 Ghostty pane 里的 AI 助手（如 Codex 与 Google Antigravity）按需自动互发消息：一边写代码、一边审代码，不用你手动 copy-paste。三种终端可以混用。
 
 > [!WARNING]
 > **模型使用提示**：我们不太建议使用Anthropic的任何模型，因为我们发现它会在背后故意诱导实验结果。
@@ -33,7 +33,7 @@
 
 ## 依赖
 
-- macOS + iTerm2 或系统自带的 Terminal（终端），用 `osascript` 定位和通知会话
+- macOS + iTerm2、系统自带的 Terminal（终端）或 Ghostty 1.4.0+，用 `osascript` 定位和通知会话
 - bash 3.2+（macOS 自带即可）
 - `jq`（可选，`brew install jq`；没有时使用内置的简单字段解析）
 - `fswatch`（可选，没有就回退到 1s 轮询；推荐 `brew install fswatch`）
@@ -75,7 +75,7 @@ ln -sf AGENTS.md GEMINI.md
 echo '.ai-mailbox/' >> .gitignore
 ```
 
-### 每次开新 iTerm2 pane 或 Terminal 标签页
+### 每次开新 iTerm2、Terminal 或 Ghostty pane
 
 **Pane A（跑 Codex 的）：**
 ```bash
@@ -92,13 +92,15 @@ agy                  # 启动 Google Antigravity CLI
 ```
 
 `ai-pane-register` 做三件事：
-1. 自动识别终端，把会话身份和通知目标存到 `.ai-mailbox/.panes/<role>.json`：iTerm2 使用 `$ITERM_SESSION_ID` 的 UUID；Terminal 使用 `$TERM_SESSION_ID`，同时记录窗口 ID、TTY 和会话进程
+1. 自动识别终端，把会话身份和通知目标存到 `.ai-mailbox/.panes/<role>.json`：iTerm2 使用 `$ITERM_SESSION_ID` 的 UUID；Terminal 使用 `$TERM_SESSION_ID`，同时记录窗口 ID、TTY 和会话进程；Ghostty 使用 `$GHOSTTY_SURFACE_ID`，同时记录 AppleScript 终端 ID、TTY 和会话进程
 2. 启动 `ai-collab-watch <role>` 后台进程（log 在 `.ai-mailbox/.watch-<role>.log`）
 3. 清理同一 role+mailbox 的旧 watcher，再启动新的 watcher
 
 建议在项目根目录执行 `ai-pane-register`。如果当前目录的上层已经有 `.ai-mailbox/`，`ai-pane-register` 会提示你正在使用或创建一套嵌套 mailbox；这通常意味着你应该先 `cd` 回上层项目根目录。
 
 Terminal 的用法相同，例如在两个标签页分别执行 `ai-pane-register terminal_one` 和 `ai-pane-register terminal_two`，然后启动 AI。请直接在标签页的 shell 中注册；之后 AI 的子进程即使没有 TTY，也能通过继承的 `$TERM_PROGRAM` / `$TERM_SESSION_ID` 识别发送者。首次注册或收信时，如果 macOS 提示自动化权限，请允许调用方控制 Terminal。
+
+Ghostty 中，在两个原生分屏的 shell 分别执行 `ai-pane-register ghostty_one` 和 `ai-pane-register ghostty_two`，然后启动 AI。Ghostty 1.4.0+ 提供 `$GHOSTTY_SURFACE_ID`，AI 子进程即使没有 TTY 也能识别发送者；注册时通过 TTY 找到对应的 AppleScript 终端 UUID。保持 `macos-applescript` 启用（默认值），并在提示时允许自动化控制 Ghostty。升级 Ghostty 后请打开新 pane 再注册。参见 [Ghostty 1.4 版本说明](https://ghostty.org/docs/install/release-notes/1-4-0) 和 [AppleScript 文档](https://ghostty.org/docs/features/applescript)。
 
 **关闭 pane 之前**（可选清理）：
 
@@ -167,6 +169,7 @@ echo "..." | ai-ping <to>                                  # stdin
 - **`.dispatched` sidecar 去重**：只有 osascript 返回明确的 `ok` 后才创建；`session not found`、Automation `-1743` 或未知返回都保持未派发
 - **sidecar 不是消费回执**：它只表示目标终端接受了注入；AI 是否读取、处理仍以 peer 回复或显式 receipt 为准。升级前留下的空 sidecar 不能追溯证明真实送达
 - **Terminal 定位**：通知只注入注册的窗口 ID + TTY，不切换焦点。每次发送前校验会话进程的启动时间和 TTY，避免关闭标签页后 TTY 复用导致错投。把标签页移到其他窗口或重启 Terminal 后需要重新注册
+- **Ghostty 定位**：继承的 core surface ID 用于识别发送者；通知目标使用注册的 AppleScript 终端 UUID + TTY，并校验会话进程。文本与 Enter 分开发送，使 TUI 能正常提交。关闭重开 pane 或重启 Ghostty 后需要重新注册。仅支持 macOS Ghostty 1.4.0+；旧版本缺少 AI 子进程所需的会话环境变量
 - **Harness typed transport**：`ai-harness-transport` 只接受 Harness 已解析并 fencing 的 exact iTerm session，不解析 role、不选择 mailbox、不写 `.dispatched`。它只在 exact session 注入得到明确 `ok` 后返回结构化、去除 raw session 的 transport evidence；policy route、delivery ACK 与 consumption ACK 仍由 Harness Host 验证。
 - **Harness participant mode**：Harness 启动的 participant 仍使用相同 `ai-ping <to>` / `--reply-to <delivery-id>` 命令，但 intent 经 Host-issued scoped context 返回 Host；Host 结合本地 IPC peer PID 与 exact owned descendant process chain 核验 sender。Host 将 route/envelope 持久化后，命令立即返回紧凑的 `accepted` 结果；dispatch、delivery/consumption ACK、retry 与 restart recovery 由 Host 独立监督。正常 ACK 只进入机器状态/UI/审计，不作为“对方已收到”消息重新注入 Agent、触发模型推理或形成 ACK 循环。该模式禁止 `--from`，不会写入或回退到 legacy mailbox；显式查询/等待使用 Host read model，不复用 legacy `--wait`。
 - **atomic write**：`mktemp + mv`，watcher 不会读到半截写入的文件
@@ -188,6 +191,12 @@ echo "..." | ai-ping <to>                                  # stdin
 **`session not found`**：
 - iTerm2 重启或换 pane 后 UUID 失效。消息不会写 `.dispatched`；在新 pane 重跑 `ai-pane-register <role>` 后会重新尝试
 - Terminal 标签页关闭、移到其他窗口或会话进程退出时，也会保持消息未派发；在目标标签页重跑 `ai-pane-register <role>`
+- Ghostty 中注册的终端或会话进程失效时，也会保持消息未派发；在目标 pane 重跑 `ai-pane-register <role>`
+
+**`GHOSTTY_SURFACE_ID is missing or invalid` / `Cannot locate Ghostty pane`**：
+- 使用 macOS Ghostty 1.4.0+，升级后打开新 pane，在启动 AI 前直接从 pane 的 shell 注册
+- 确认 AI 继承了 `$TERM_PROGRAM=ghostty` 和 `$GHOSTTY_SURFACE_ID`；保持 `macos-applescript` 启用，并允许自动化控制 Ghostty
+- 在原生 Ghostty pane 中注册，不要在 tmux/screen 内注册；注册需要 Ghostty pane 自身的 TTY
 
 **在 Terminal 里仍提示 `ITERM_SESSION_ID not set`**：
 - 当前命令还是旧安装。运行 `command -v ai-pane-register` 确认位置，再在本仓库运行 `./install.sh` 更新命令链接；使用复制安装时执行 `./install.sh --copy`
@@ -219,7 +228,7 @@ python3 -m pytest -q \
 ./tests/test-ai-collab-watch.sh
 ```
 
-回归覆盖 Terminal 注册/注销、混用终端收发、管道输入、嵌套 mailbox、doctor、TTY 复用保护，以及两种终端的正常注入、session 缺失、Automation `-1743`、sidecar 去重和未知返回。测试使用本地 osascript/fswatch test double，不会向真实终端注入文本。需要先安装 pytest，或用 `uv run --with pytest python -m pytest -q tests/` 运行 Python 测试。
+回归覆盖 Terminal/Ghostty 注册和注销、三种终端混用收发、无 TTY 子进程继承身份、管道输入、嵌套 mailbox、doctor、TTY 复用保护，以及正常注入、session 缺失、Automation `-1743`、sidecar 去重和未知返回。测试使用本地 osascript/fswatch test double，不会向真实终端注入文本。需要先安装 pytest，或用 `uv run --with pytest python -m pytest -q tests/test-*.py` 运行 Python 测试。
 
 ## 协议说明（给 AI 看）
 

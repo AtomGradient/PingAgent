@@ -129,7 +129,8 @@ if [[ -z "$ROLE" ]]; then
   if [[ -z "$SESSION_UUID" ]] || ! select_mailbox_for_current_session; then
     echo "Cannot auto-detect role in any .ai-mailbox upward from $PWD. Either:" >&2
     echo "  1) pass <role> explicitly: ai-pane-unregister <role>" >&2
-    echo "  2) run from the same iTerm2 pane or Terminal tab that ran ai-pane-register" >&2
+    echo "  2) run from the same iTerm2, Terminal, or Ghostty pane that ran ai-pane-register" >&2
+    [[ -z "$SESSION_ERROR" ]] || echo "  $SESSION_ERROR" >&2
     echo "" >&2
     echo "Currently registered:" >&2
     print_mailbox_candidates

@@ -52,7 +52,7 @@ ai-ping doctor
 | `--file <path>` | | 从文件读消息正文。**推荐**：避免 shell 转义，保留代码块/换行 |
 | `--kind <kind>` | | 消息类型，默认 `msg`。完整表见下面 |
 | `--reply-to <id>` | | 这是对某条消息的回复。`<id>` 来自被回复消息的 frontmatter 里 `id:` 字段 |
-| `--from <role>` | | 显式指定发送者。默认从 iTerm2 的 `$ITERM_SESSION_ID` 或 Terminal 的 `$TERM_SESSION_ID` 自动反查 |
+| `--from <role>` | | 显式指定发送者。默认从 iTerm2 的 `$ITERM_SESSION_ID`、Terminal 的 `$TERM_SESSION_ID` 或 Ghostty 的 `$GHOSTTY_SURFACE_ID` 自动反查 |
 | `--wait` | | 阻塞直到收到 `reply_to=本次msg_id` 的回复（每 2s 轮询） |
 | `--timeout <sec>` | | `--wait` 的最大等待秒数。默认 300 |
 | 位置参数 | | 短消息可直接作命令行参数；与 `--file` / stdin 三选一 |
@@ -88,7 +88,7 @@ ai-ping antigravity "..."  ─►  inbox/antigravity/<id>.md
 
 消息文件 = YAML frontmatter + markdown 正文。frontmatter 至少有 `id` `from` `to` `kind` `created`，回复时还有 `reply_to`。
 
-Legacy mailbox 支持 iTerm2 和 macOS 自带 Terminal，也支持双方使用不同终端。Terminal 通过 `$TERM_SESSION_ID` 识别发送者，以注册时保存的窗口 ID + TTY 定位接收标签页，并校验会话进程防止 TTY 复用；旧的 iTerm2 注册文件仍可使用。请在启动 AI 前直接在标签页中注册，移动到其他窗口或重启后重新注册。首次使用可能需要允许 macOS 自动化权限来控制目标终端。
+Legacy mailbox 支持 iTerm2、macOS 自带 Terminal 和 macOS Ghostty 1.4.0+，也支持双方使用不同终端。Terminal 通过 `$TERM_SESSION_ID` 识别发送者，以注册时保存的窗口 ID + TTY 定位接收标签页。Ghostty 通过 `$GHOSTTY_SURFACE_ID` 识别发送者，注册时通过 TTY 找到另一个独立的 AppleScript 终端 UUID；投递时匹配该 UUID 和 TTY，分开发送文本与 Enter。两者均校验会话进程防止 TTY 复用；旧的 iTerm2 注册文件仍可使用。请在启动 AI 前直接在原生 pane 的 shell 中注册（不要在 tmux/screen 内注册），重启或关闭重开后重新注册；Terminal 标签页移到其他窗口后也需要重新注册。首次使用可能需要允许 macOS 自动化权限来控制目标终端；Ghostty 需保持 `macos-applescript` 启用。
 
 上图只描述 legacy mailbox 模式。Harness Scenario 模式是 `participant ai-ping → scoped product client → Host policy/delivery → exact-session transport`，不会产生 `.ai-mailbox` 文件。
 
@@ -135,6 +135,8 @@ watcher 只有在 osascript 以 0 退出且返回精确 `ok` 时才写 `<msg>.md
 | 错误信息 | 原因 | 解决 |
 |---|---|---|
 | `Cannot auto-detect --from` | 当前 pane 没注册 / 终端 session 环境变量缺失 | 在原终端直接跑 `ai-pane-register <role>`，确认 AI 子进程继承了会话环境 |
+| `GHOSTTY_SURFACE_ID is missing or invalid` | Ghostty 版本过旧或子进程未继承身份 | 使用 macOS Ghostty 1.4.0+，升级后打开新 pane；确认继承 `$TERM_PROGRAM` / `$GHOSTTY_SURFACE_ID` |
+| `Cannot locate Ghostty pane` | 当前 TTY 不属于 Ghostty / AppleScript 不可用 | 在原生 Ghostty pane 的 shell 中注册，启用 `macos-applescript` 并允许 Automation 权限 |
 | `No .ai-mailbox/ found upward from ...` | 当前目录不在已 register 过的项目下 | `cd <project>` 或确认 register 跑过 |
 | `<to> must be lowercase...` / `--from must be lowercase...` | role 名不合法 | 只使用小写字母、数字、下划线、短横线 |
 | `Role must be lowercase...` | `ai-pane-unregister <role>` 的 role 名不合法 | 只使用小写字母、数字、下划线、短横线 |
@@ -219,4 +221,4 @@ ai-ping codex --kind review-response --reply-to 20260511-153000-abc123 --file /t
 └── .watch-antigravity.log
 ```
 
-调试时最有用的两个文件：`.watch-<role>.log`（看 `delivery confirmed` 或分类后的 `reason=`）+ `inbox/<role>/<id>.md`（看消息内容是否对）。运行 `./tests/test-ai-collab-watch.sh` 和 `python3 -m pytest -q tests/test-terminal-support.py` 可验证两种终端的注册和派发，不会触碰真实终端。
+调试时最有用的两个文件：`.watch-<role>.log`（看 `delivery confirmed` 或分类后的 `reason=`）+ `inbox/<role>/<id>.md`（看消息内容是否对）。运行 `./tests/test-ai-collab-watch.sh` 和 `python3 -m pytest -q tests/test-terminal-support.py` 可验证三种终端的注册和派发，不会触碰真实终端。
