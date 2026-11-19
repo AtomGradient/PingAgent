@@ -351,3 +351,45 @@ def test_inconsistent_ghostty_record_never_injects(setup, changes):
     assert result.returncode != 0
     assert not calls.exists()
     assert not Path(str(message) + ".dispatched").exists()
+
+
+def test_whoami_fast_lookup_nested_mailbox_and_reserved_role(setup):
+    project, programs, env = setup
+    configure_ghostty(env)
+    register(setup, "collgue_a")
+    env["FAKE_TTY"] = "??"
+
+    nested = project / "subrepo"
+    (nested / ".ai-mailbox/.panes").mkdir(parents=True)
+    pane(nested, "other_role", session_uuid="ghostty:0x0000000000000099")
+
+    plain = run(programs, nested, env, "ai-ping", "whoami")
+    assert plain.returncode == 0, plain.stderr
+    assert plain.stdout.strip() == "collgue_a"
+
+    as_json = run(programs, nested, env, "ai-ping", "whoami", "--json")
+    assert as_json.returncode == 0, as_json.stderr
+    payload = json.loads(as_json.stdout)
+    assert payload == {
+        "role": "collgue_a",
+        "mailbox": str(project / ".ai-mailbox"),
+        "session_uuid": f"ghostty:{GHOSTTY_SURFACE_ID}",
+    }
+
+    unregistered_env = dict(env, GHOSTTY_SURFACE_ID="0x0000000000000042")
+    unregistered = run(programs, project, unregistered_env, "ai-ping", "whoami")
+    assert unregistered.returncode == 1
+    assert "not registered" in unregistered.stderr
+
+    reserved_reg = run(programs, project, env, "ai-pane-register", "whoami")
+    assert reserved_reg.returncode != 0
+    assert "reserved" in reserved_reg.stderr
+
+    reserved_send = run(programs, project, env, "ai-ping", "whoami_ok", "--from", "whoami", "hi")
+    assert reserved_send.returncode != 0
+    assert "reserved" in reserved_send.stderr
+
+    harness_env = dict(env, AI_COLLAB_HARNESS_CONTEXT="/tmp/fake-context.json")
+    harness = run(programs, project, harness_env, "ai-ping", "whoami")
+    assert harness.returncode == 2
+    assert "Harness participant mode" in harness.stderr

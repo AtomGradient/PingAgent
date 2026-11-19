@@ -20,7 +20,8 @@ Options:
   --                   后续参数当成消息正文
 
 Diagnostics:
-  ai-ping doctor       只读诊断当前项目的 mailbox / 注册 / watcher 状态
+  ai-ping whoami [--json]  只读快速输出当前 pane 已注册的 role（毫秒级，不扫历史消息）
+  ai-ping doctor           只读诊断当前项目的 mailbox / 注册 / watcher 状态
 
 示例：
   ai-ping antigravity "请审核 src/auth.ts 的并发"
@@ -41,6 +42,69 @@ if [[ "$1" == "doctor" ]]; then
   fi
   shift
   exec ai-pane-doctor "$@"
+fi
+if [[ "$1" == "whoami" ]]; then
+  shift
+  WHOAMI_JSON=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        echo "Usage: ai-ping whoami [--json]"
+        echo "Prints the registered mailbox role for the current terminal session."
+        exit 0
+        ;;
+      --json)
+        WHOAMI_JSON=true
+        shift
+        ;;
+      *)
+        echo "Unknown option for 'ai-ping whoami': $1" >&2
+        exit 2
+        ;;
+    esac
+  done
+  if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" ]]; then
+    echo "Harness participant mode active; sender identity is scoped by Host context." >&2
+    exit 2
+  fi
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  source "$SCRIPT_DIR/ai-terminal-common.sh"
+  ai_detect_terminal
+  WHOAMI_NEAREST=""
+  WHOAMI_DIR="$PWD"
+  while [[ "$WHOAMI_DIR" != "/" && "$WHOAMI_DIR" != "" ]]; do
+    if [[ -d "$WHOAMI_DIR/.ai-mailbox" ]]; then
+      [[ -z "$WHOAMI_NEAREST" ]] && WHOAMI_NEAREST="$WHOAMI_DIR/.ai-mailbox"
+      if [[ -n "$SESSION_UUID" ]]; then
+        for WHOAMI_F in "$WHOAMI_DIR/.ai-mailbox/.panes/"*.json; do
+          [[ -f "$WHOAMI_F" ]] || continue
+          if [[ "$(ai_pane_field "$WHOAMI_F" session_uuid)" == "$SESSION_UUID" ]]; then
+            WHOAMI_ROLE=$(basename "$WHOAMI_F" .json)
+            if $WHOAMI_JSON; then
+              if command -v jq >/dev/null 2>&1; then
+                jq -cn --arg role "$WHOAMI_ROLE" --arg mailbox "$WHOAMI_DIR/.ai-mailbox" --arg session_uuid "$SESSION_UUID" \
+                  '{role: $role, mailbox: $mailbox, session_uuid: $session_uuid}'
+              else
+                python3 -c 'import json,sys; print(json.dumps({"role": sys.argv[1], "mailbox": sys.argv[2], "session_uuid": sys.argv[3]}))' \
+                  "$WHOAMI_ROLE" "$WHOAMI_DIR/.ai-mailbox" "$SESSION_UUID"
+              fi
+            else
+              printf '%s\n' "$WHOAMI_ROLE"
+            fi
+            exit 0
+          fi
+        done
+      fi
+    fi
+    WHOAMI_DIR="$(dirname "$WHOAMI_DIR")"
+  done
+  if [[ -z "$WHOAMI_NEAREST" ]]; then
+    echo "No .ai-mailbox/ found upward from $PWD" >&2
+    exit 1
+  fi
+  echo "Current session is not registered in any .ai-mailbox upward from $PWD." >&2
+  [[ -z "$SESSION_ERROR" ]] || echo "  $SESSION_ERROR" >&2
+  exit 1
 fi
 
 TO="$1"; shift
@@ -73,8 +137,8 @@ validate_role() {
     echo "$label must be lowercase alphanum, underscore, or dash (got: $role)" >&2
     exit 1
   fi
-  if [[ "$role" == "doctor" ]]; then
-    echo "$label role 'doctor' is reserved for 'ai-ping doctor'" >&2
+  if [[ "$role" == "doctor" || "$role" == "whoami" ]]; then
+    echo "$label role '$role' is reserved for 'ai-ping $role'" >&2
     exit 1
   fi
 }

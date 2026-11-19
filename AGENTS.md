@@ -52,6 +52,9 @@ ai-ping <对方role> --wait --timeout 600 --file /tmp/req.md
 # stdin 也可以
 echo "请审核" | ai-ping <对方role> --kind review-request
 
+# 查看当前 pane 已注册的 role（毫秒级只读，冷启动自检推荐）
+ai-ping whoami
+
 # 排障自检（只读，不会 kill / 删 / 写）
 ai-ping doctor
 ```
