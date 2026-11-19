@@ -393,11 +393,19 @@ def test_whoami_fast_lookup_nested_mailbox_and_reserved_role(setup):
     assert reserved_send.returncode != 0
     assert "reserved" in reserved_send.stderr
 
-    for harness_var in ("AI_COLLAB_HARNESS_CONTEXT", "AI_COLLAB_HARNESS_CLIENT_EXECUTABLE", "AI_COLLAB_HARNESS_CLIENT_PYTHONPATH"):
+    for harness_var in (
+        "AI_COLLAB_HARNESS_CONTEXT",
+        "AI_COLLAB_HARNESS_COLLABORATION_CONTEXT",
+        "AI_COLLAB_HARNESS_CLIENT_EXECUTABLE",
+        "AI_COLLAB_HARNESS_CLIENT_PYTHONPATH",
+    ):
         harness_env = dict(env, **{harness_var: "/tmp/fake-harness-marker"})
         harness = run(programs, project, harness_env, "ai-ping", "whoami")
         assert harness.returncode == 2
         assert "Harness" in harness.stderr
+        harness_send = run(programs, project, harness_env, "ai-ping", "peer_any", "hello")
+        assert harness_send.returncode != 0
+        assert not (project / ".ai-mailbox/inbox/peer_any").exists()
 
     # If the same session is also registered in the nested mailbox while an ancestor
     # mailbox holds the peer, bare 'whoami' fails closed on ambiguity whereas

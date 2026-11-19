@@ -34,6 +34,14 @@ EOF
 
 [[ $# -lt 1 ]] && usage
 case "$1" in -h|--help) usage ;; esac
+
+ai_has_harness_marker() {
+  [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" \
+     || -n "${AI_COLLAB_HARNESS_COLLABORATION_CONTEXT:-}" \
+     || -n "${AI_COLLAB_HARNESS_CLIENT_EXECUTABLE:-}" \
+     || -n "${AI_COLLAB_HARNESS_CLIENT_PYTHONPATH:-}" ]]
+}
+
 if [[ "$1" == "doctor" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if [[ -x "$SCRIPT_DIR/ai-pane-doctor" ]]; then
@@ -75,7 +83,7 @@ if [[ "$1" == "whoami" ]]; then
       exit 2
     fi
   fi
-  if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" || -n "${AI_COLLAB_HARNESS_CLIENT_EXECUTABLE:-}" || -n "${AI_COLLAB_HARNESS_CLIENT_PYTHONPATH:-}" ]]; then
+  if ai_has_harness_marker; then
     echo "Harness participant mode or partial Harness environment active; sender identity is scoped by Host context." >&2
     exit 2
   fi
@@ -235,7 +243,7 @@ fi
 # state.  Environment values only locate the Host-issued context and canonical
 # product client; Host still requires the scoped capability plus owned-process
 # proof before accepting the sender.
-if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" ]]; then
+if ai_has_harness_marker; then
   if $FROM_EXPLICIT; then
     echo "--from is forbidden inside a Harness Scenario; sender identity is scoped by Host." >&2
     exit 1
@@ -244,6 +252,7 @@ if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" ]]; then
     echo "--wait is not available in Harness participant mode yet; inspect delivery state through Host." >&2
     exit 1
   fi
+  HARNESS_CONTEXT="${AI_COLLAB_HARNESS_CONTEXT:-${AI_COLLAB_HARNESS_COLLABORATION_CONTEXT:-}}"
   HARNESS_CLIENT="${AI_COLLAB_HARNESS_CLIENT_EXECUTABLE:-}"
   HARNESS_PYTHONPATH="${AI_COLLAB_HARNESS_CLIENT_PYTHONPATH:-}"
   if [[ "$HARNESS_CLIENT" != /* || ! -x "$HARNESS_CLIENT" || -L "$HARNESS_CLIENT" ]]; then
@@ -254,7 +263,7 @@ if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" ]]; then
     echo "Harness participant client module path is unavailable." >&2
     exit 1
   fi
-  if [[ ! -f "$AI_COLLAB_HARNESS_CONTEXT" || -L "$AI_COLLAB_HARNESS_CONTEXT" ]]; then
+  if [[ "$HARNESS_CONTEXT" != /* || ! -f "$HARNESS_CONTEXT" || -L "$HARNESS_CONTEXT" ]]; then
     echo "Harness participant context is unavailable." >&2
     exit 1
   fi
@@ -262,7 +271,7 @@ if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" ]]; then
   HARNESS_ARGS=(
     -m edgestudio.harness.participant_client
     "$HARNESS_OPERATION"
-    --context "$AI_COLLAB_HARNESS_CONTEXT"
+    --context "$HARNESS_CONTEXT"
     --to "$TO"
     --kind "$KIND"
   )
@@ -271,7 +280,7 @@ if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" ]]; then
     HARNESS_ARGS=(
       -m edgestudio.harness.participant_client
       "$HARNESS_OPERATION"
-      --context "$AI_COLLAB_HARNESS_CONTEXT"
+      --context "$HARNESS_CONTEXT"
       --to "$TO"
       --kind "$KIND"
       --reply-to "$REPLY_TO"
