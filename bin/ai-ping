@@ -20,8 +20,8 @@ Options:
   --                   后续参数当成消息正文
 
 Diagnostics:
-  ai-ping whoami [--json]  只读快速输出当前 pane 已注册的 role（毫秒级，不扫历史消息）
-  ai-ping doctor           只读诊断当前项目的 mailbox / 注册 / watcher 状态
+  ai-ping whoami [--json] [--to <role>]  只读快速输出当前 pane 已注册的 role（毫秒级）
+  ai-ping doctor                         只读诊断当前项目的 mailbox / 注册 / watcher 状态
 
 示例：
   ai-ping antigravity "请审核 src/auth.ts 的并发"
@@ -46,10 +46,11 @@ fi
 if [[ "$1" == "whoami" ]]; then
   shift
   WHOAMI_JSON=false
+  WHOAMI_TO=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -h|--help)
-        echo "Usage: ai-ping whoami [--json]"
+        echo "Usage: ai-ping whoami [--json] [--to <target-role>]"
         echo "Prints the registered mailbox role for the current terminal session."
         exit 0
         ;;
@@ -57,54 +58,135 @@ if [[ "$1" == "whoami" ]]; then
         WHOAMI_JSON=true
         shift
         ;;
+      --to)
+        [[ $# -ge 2 ]] || { echo "Missing value for --to" >&2; exit 2; }
+        WHOAMI_TO="$2"
+        shift 2
+        ;;
       *)
         echo "Unknown option for 'ai-ping whoami': $1" >&2
         exit 2
         ;;
     esac
   done
-  if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" ]]; then
-    echo "Harness participant mode active; sender identity is scoped by Host context." >&2
+  if [[ -n "$WHOAMI_TO" ]]; then
+    if [[ ! "$WHOAMI_TO" =~ ^[a-z0-9_-]+$ ]] || [[ "$WHOAMI_TO" == "doctor" || "$WHOAMI_TO" == "whoami" ]]; then
+      echo "Invalid or reserved --to role for 'ai-ping whoami': $WHOAMI_TO" >&2
+      exit 2
+    fi
+  fi
+  if [[ -n "${AI_COLLAB_HARNESS_CONTEXT:-}" || -n "${AI_COLLAB_HARNESS_CLIENT_EXECUTABLE:-}" || -n "${AI_COLLAB_HARNESS_CLIENT_PYTHONPATH:-}" ]]; then
+    echo "Harness participant mode or partial Harness environment active; sender identity is scoped by Host context." >&2
     exit 2
   fi
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   source "$SCRIPT_DIR/ai-terminal-common.sh"
   ai_detect_terminal
   WHOAMI_NEAREST=""
-  WHOAMI_DIR="$PWD"
-  while [[ "$WHOAMI_DIR" != "/" && "$WHOAMI_DIR" != "" ]]; do
-    if [[ -d "$WHOAMI_DIR/.ai-mailbox" ]]; then
-      [[ -z "$WHOAMI_NEAREST" ]] && WHOAMI_NEAREST="$WHOAMI_DIR/.ai-mailbox"
-      if [[ -n "$SESSION_UUID" ]]; then
-        for WHOAMI_F in "$WHOAMI_DIR/.ai-mailbox/.panes/"*.json; do
-          [[ -f "$WHOAMI_F" ]] || continue
-          if [[ "$(ai_pane_field "$WHOAMI_F" session_uuid)" == "$SESSION_UUID" ]]; then
-            WHOAMI_ROLE=$(basename "$WHOAMI_F" .json)
-            if $WHOAMI_JSON; then
-              if command -v jq >/dev/null 2>&1; then
-                jq -cn --arg role "$WHOAMI_ROLE" --arg mailbox "$WHOAMI_DIR/.ai-mailbox" --arg session_uuid "$SESSION_UUID" \
-                  '{role: $role, mailbox: $mailbox, session_uuid: $session_uuid}'
-              else
-                python3 -c 'import json,sys; print(json.dumps({"role": sys.argv[1], "mailbox": sys.argv[2], "session_uuid": sys.argv[3]}))' \
-                  "$WHOAMI_ROLE" "$WHOAMI_DIR/.ai-mailbox" "$SESSION_UUID"
-              fi
-            else
-              printf '%s\n' "$WHOAMI_ROLE"
-            fi
-            exit 0
-          fi
-        done
+  WHOAMI_MATCH_ROLES=()
+  WHOAMI_MATCH_MAILBOXES=()
+  WHOAMI_COUNT=0
+
+  whoami_collect_roles_in_mailbox() {
+    local mb="$1" f r
+    WHOAMI_BOX_ROLES=()
+    WHOAMI_BOX_COUNT=0
+    [[ -n "$SESSION_UUID" ]] || return 0
+    for f in "$mb/.panes/"*.json; do
+      [[ -f "$f" ]] || continue
+      if [[ "$(ai_pane_field "$f" session_uuid)" == "$SESSION_UUID" ]]; then
+        r=$(basename "$f" .json)
+        WHOAMI_BOX_ROLES[$WHOAMI_BOX_COUNT]="$r"
+        WHOAMI_BOX_COUNT=$((WHOAMI_BOX_COUNT + 1))
       fi
+    done
+  }
+
+  WHOAMI_DIR="$PWD"
+  if [[ -n "$WHOAMI_TO" ]]; then
+    # Mirror select_mailbox_for_auto_from exact two-pass priority for --to <peer>.
+    while [[ "$WHOAMI_DIR" != "/" && "$WHOAMI_DIR" != "" ]]; do
+      if [[ -d "$WHOAMI_DIR/.ai-mailbox" ]]; then
+        [[ -z "$WHOAMI_NEAREST" ]] && WHOAMI_NEAREST="$WHOAMI_DIR/.ai-mailbox"
+        if [[ -f "$WHOAMI_DIR/.ai-mailbox/.panes/$WHOAMI_TO.json" ]]; then
+          whoami_collect_roles_in_mailbox "$WHOAMI_DIR/.ai-mailbox"
+          if [[ "$WHOAMI_BOX_COUNT" -gt 0 ]]; then
+            for WHOAMI_R in "${WHOAMI_BOX_ROLES[@]}"; do
+              WHOAMI_MATCH_ROLES[$WHOAMI_COUNT]="$WHOAMI_R"
+              WHOAMI_MATCH_MAILBOXES[$WHOAMI_COUNT]="$WHOAMI_DIR/.ai-mailbox"
+              WHOAMI_COUNT=$((WHOAMI_COUNT + 1))
+            done
+            break
+          fi
+        fi
+      fi
+      WHOAMI_DIR="$(dirname "$WHOAMI_DIR")"
+    done
+    if [[ "$WHOAMI_COUNT" -eq 0 ]]; then
+      WHOAMI_DIR="$PWD"
+      while [[ "$WHOAMI_DIR" != "/" && "$WHOAMI_DIR" != "" ]]; do
+        if [[ -d "$WHOAMI_DIR/.ai-mailbox" ]]; then
+          whoami_collect_roles_in_mailbox "$WHOAMI_DIR/.ai-mailbox"
+          if [[ "$WHOAMI_BOX_COUNT" -gt 0 ]]; then
+            for WHOAMI_R in "${WHOAMI_BOX_ROLES[@]}"; do
+              WHOAMI_MATCH_ROLES[$WHOAMI_COUNT]="$WHOAMI_R"
+              WHOAMI_MATCH_MAILBOXES[$WHOAMI_COUNT]="$WHOAMI_DIR/.ai-mailbox"
+              WHOAMI_COUNT=$((WHOAMI_COUNT + 1))
+            done
+            break
+          fi
+        fi
+        WHOAMI_DIR="$(dirname "$WHOAMI_DIR")"
+      done
     fi
-    WHOAMI_DIR="$(dirname "$WHOAMI_DIR")"
-  done
+  else
+    # Without --to, scan all ancestor mailboxes so split/ambiguous registrations fail closed.
+    while [[ "$WHOAMI_DIR" != "/" && "$WHOAMI_DIR" != "" ]]; do
+      if [[ -d "$WHOAMI_DIR/.ai-mailbox" ]]; then
+        [[ -z "$WHOAMI_NEAREST" ]] && WHOAMI_NEAREST="$WHOAMI_DIR/.ai-mailbox"
+        whoami_collect_roles_in_mailbox "$WHOAMI_DIR/.ai-mailbox"
+        if [[ "$WHOAMI_BOX_COUNT" -gt 0 ]]; then
+          for WHOAMI_R in "${WHOAMI_BOX_ROLES[@]}"; do
+            WHOAMI_MATCH_ROLES[$WHOAMI_COUNT]="$WHOAMI_R"
+            WHOAMI_MATCH_MAILBOXES[$WHOAMI_COUNT]="$WHOAMI_DIR/.ai-mailbox"
+            WHOAMI_COUNT=$((WHOAMI_COUNT + 1))
+          done
+        fi
+      fi
+      WHOAMI_DIR="$(dirname "$WHOAMI_DIR")"
+    done
+  fi
+
   if [[ -z "$WHOAMI_NEAREST" ]]; then
     echo "No .ai-mailbox/ found upward from $PWD" >&2
     exit 1
   fi
-  echo "Current session is not registered in any .ai-mailbox upward from $PWD." >&2
-  [[ -z "$SESSION_ERROR" ]] || echo "  $SESSION_ERROR" >&2
-  exit 1
+  if [[ "$WHOAMI_COUNT" -eq 0 ]]; then
+    echo "Current session is not registered in any .ai-mailbox upward from $PWD." >&2
+    [[ -z "$SESSION_ERROR" ]] || echo "  $SESSION_ERROR" >&2
+    exit 1
+  fi
+  if [[ "$WHOAMI_COUNT" -gt 1 ]]; then
+    echo "Ambiguous registration: current session matches multiple roles/mailboxes upward from $PWD:" >&2
+    WHOAMI_IDX=0
+    while [[ "$WHOAMI_IDX" -lt "$WHOAMI_COUNT" ]]; do
+      echo "  role=${WHOAMI_MATCH_ROLES[$WHOAMI_IDX]} mailbox=${WHOAMI_MATCH_MAILBOXES[$WHOAMI_IDX]}" >&2
+      WHOAMI_IDX=$((WHOAMI_IDX + 1))
+    done
+    echo "Use 'ai-pane-unregister <role>' to clean stale bindings or pass '--to <peer>' to resolve." >&2
+    exit 1
+  fi
+  WHOAMI_ROLE="${WHOAMI_MATCH_ROLES[0]}"
+  WHOAMI_MAILBOX="${WHOAMI_MATCH_MAILBOXES[0]}"
+  if $WHOAMI_JSON; then
+    printf '{"role":%s,"mailbox":%s,"session_uuid":%s}\n' \
+      "$(ai_json_quote "$WHOAMI_ROLE")" \
+      "$(ai_json_quote "$WHOAMI_MAILBOX")" \
+      "$(ai_json_quote "$SESSION_UUID")"
+  else
+    printf '%s\n' "$WHOAMI_ROLE"
+  fi
+  exit 0
 fi
 
 TO="$1"; shift

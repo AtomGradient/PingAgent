@@ -13,8 +13,8 @@ if [[ -n "$ROLE" && ! "$ROLE" =~ ^[a-z0-9_-]+$ ]]; then
   echo "Role must be lowercase alphanum, underscore, or dash (got: $ROLE)" >&2
   exit 1
 fi
-if [[ "$ROLE" == "doctor" ]]; then
-  echo "Role 'doctor' is reserved for 'ai-ping doctor'" >&2
+if [[ "$ROLE" == "doctor" || "$ROLE" == "whoami" ]]; then
+  echo "Role '$ROLE' is reserved for 'ai-ping $ROLE'" >&2
   exit 1
 fi
 

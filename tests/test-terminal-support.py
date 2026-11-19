@@ -385,11 +385,29 @@ def test_whoami_fast_lookup_nested_mailbox_and_reserved_role(setup):
     assert reserved_reg.returncode != 0
     assert "reserved" in reserved_reg.stderr
 
+    reserved_unreg = run(programs, project, env, "ai-pane-unregister", "whoami")
+    assert reserved_unreg.returncode != 0
+    assert "reserved" in reserved_unreg.stderr
+
     reserved_send = run(programs, project, env, "ai-ping", "whoami_ok", "--from", "whoami", "hi")
     assert reserved_send.returncode != 0
     assert "reserved" in reserved_send.stderr
 
-    harness_env = dict(env, AI_COLLAB_HARNESS_CONTEXT="/tmp/fake-context.json")
-    harness = run(programs, project, harness_env, "ai-ping", "whoami")
-    assert harness.returncode == 2
-    assert "Harness participant mode" in harness.stderr
+    for harness_var in ("AI_COLLAB_HARNESS_CONTEXT", "AI_COLLAB_HARNESS_CLIENT_EXECUTABLE", "AI_COLLAB_HARNESS_CLIENT_PYTHONPATH"):
+        harness_env = dict(env, **{harness_var: "/tmp/fake-harness-marker"})
+        harness = run(programs, project, harness_env, "ai-ping", "whoami")
+        assert harness.returncode == 2
+        assert "Harness" in harness.stderr
+
+    # If the same session is also registered in the nested mailbox while an ancestor
+    # mailbox holds the peer, bare 'whoami' fails closed on ambiguity whereas
+    # 'whoami --to peer_root' matches select_mailbox_for_auto_from routing.
+    pane(project, "peer_root", session_uuid="ghostty:0x0000000000000088")
+    pane(nested, "local_seat", session_uuid=f"ghostty:{GHOSTTY_SURFACE_ID}")
+    ambig = run(programs, nested, env, "ai-ping", "whoami")
+    assert ambig.returncode == 1
+    assert "Ambiguous registration" in ambig.stderr
+
+    disambig = run(programs, nested, env, "ai-ping", "whoami", "--to", "peer_root")
+    assert disambig.returncode == 0, disambig.stderr
+    assert disambig.stdout.strip() == "collgue_a"
