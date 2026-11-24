@@ -94,6 +94,9 @@ if [[ "$1" == "whoami" ]]; then
   WHOAMI_MATCH_ROLES=()
   WHOAMI_MATCH_MAILBOXES=()
   WHOAMI_COUNT=0
+  WHOAMI_DETACHED_ROLE=""
+  WHOAMI_DETACHED_MAILBOX=""
+  WHOAMI_DETACHED_OWNER_PID=""
 
   whoami_collect_roles_in_mailbox() {
     local mb="$1" f r
@@ -104,8 +107,14 @@ if [[ "$1" == "whoami" ]]; then
       [[ -f "$f" ]] || continue
       if [[ "$(ai_pane_field "$f" session_uuid)" == "$SESSION_UUID" ]]; then
         r=$(basename "$f" .json)
-        WHOAMI_BOX_ROLES[$WHOAMI_BOX_COUNT]="$r"
-        WHOAMI_BOX_COUNT=$((WHOAMI_BOX_COUNT + 1))
+        if ai_pane_owner_matches_caller "$f"; then
+          WHOAMI_BOX_ROLES[$WHOAMI_BOX_COUNT]="$r"
+          WHOAMI_BOX_COUNT=$((WHOAMI_BOX_COUNT + 1))
+        elif [[ -z "$WHOAMI_DETACHED_ROLE" ]]; then
+          WHOAMI_DETACHED_ROLE="$r"
+          WHOAMI_DETACHED_MAILBOX="$mb"
+          WHOAMI_DETACHED_OWNER_PID=$(ai_pane_field "$f" terminal_owner_pid)
+        fi
       fi
     done
   }
@@ -170,8 +179,18 @@ if [[ "$1" == "whoami" ]]; then
     exit 1
   fi
   if [[ "$WHOAMI_COUNT" -eq 0 ]]; then
+    if [[ -n "$WHOAMI_DETACHED_ROLE" ]]; then
+      echo "Refusing auto-detected role '$WHOAMI_DETACHED_ROLE' in $WHOAMI_DETACHED_MAILBOX: current process is not a descendant of registered terminal owner pid $WHOAMI_DETACHED_OWNER_PID (session $SESSION_UUID)." >&2
+      echo "  The command appears to be running in a detached background daemon (e.g. 'codex app-server' with daemon_auto_start=true) carrying a stale terminal environment, or the registered pane session exited." >&2
+      echo "  Stop the shared daemon / set daemon_auto_start=false, or re-run 'ai-pane-register $WHOAMI_DETACHED_ROLE' in this pane." >&2
+      exit 1
+    fi
     echo "Current session is not registered in any .ai-mailbox upward from $PWD." >&2
+    [[ -z "$SESSION_UUID" ]] || echo "  detected session: $SESSION_UUID" >&2
     [[ -z "$SESSION_ERROR" ]] || echo "  $SESSION_ERROR" >&2
+    if [[ -n "$SESSION_UUID" ]] && ! ai_caller_has_tty_ancestor; then
+      echo "  hint: current process has no controlling terminal ancestor; if running inside a shared background daemon (e.g. 'codex app-server' with daemon_auto_start=true), it may be reusing a stale terminal environment from an older window." >&2
+    fi
     exit 1
   fi
   if [[ "$WHOAMI_COUNT" -gt 1 ]]; then
@@ -323,13 +342,20 @@ pane_file_has_session() {
 }
 
 role_for_session_in_mailbox() {
-  local mailbox="$1" session_uuid="$2" f
+  local mailbox="$1" session_uuid="$2" f r
   DETECTED_FROM=""
   for f in "$mailbox/.panes/"*.json; do
     [[ -f "$f" ]] || continue
     if pane_file_has_session "$f" "$session_uuid"; then
-      DETECTED_FROM=$(basename "$f" .json)
-      return 0
+      r=$(basename "$f" .json)
+      if ai_pane_owner_matches_caller "$f"; then
+        DETECTED_FROM="$r"
+        return 0
+      elif [[ -z "${DETACHED_FROM_ROLE:-}" ]]; then
+        DETACHED_FROM_ROLE="$r"
+        DETACHED_FROM_MAILBOX="$mailbox"
+        DETACHED_FROM_OWNER_PID=$(ai_pane_field "$f" terminal_owner_pid)
+      fi
     fi
   done
   return 1
@@ -464,6 +490,9 @@ ai_detect_terminal
 NEAREST_MAILBOX=$(find_nearest_mailbox || true)
 MAILBOX=""
 DETECTED_FROM=""
+DETACHED_FROM_ROLE=""
+DETACHED_FROM_MAILBOX=""
+DETACHED_FROM_OWNER_PID=""
 OTHER_ROLE_MAILBOX=""
 
 if [[ -z "$NEAREST_MAILBOX" ]]; then
@@ -475,10 +504,21 @@ fi
 # 自动检测 FROM（从当前终端 session id 反查 .panes/）
 if [[ -z "$FROM" ]]; then
   if [[ -z "$SESSION_UUID" ]] || ! select_mailbox_for_auto_from; then
+    if [[ -n "$DETACHED_FROM_ROLE" ]]; then
+      echo "Refusing auto-detected --from '$DETACHED_FROM_ROLE' in $DETACHED_FROM_MAILBOX: current process is not a descendant of registered terminal owner pid $DETACHED_FROM_OWNER_PID (session $SESSION_UUID)." >&2
+      echo "  The command appears to be running in a detached background daemon (e.g. 'codex app-server' with daemon_auto_start=true) carrying another pane's stale terminal environment, or the registered pane session exited." >&2
+      echo "  1) stop the shared daemon / set daemon_auto_start=false, or re-run 'ai-pane-register $DETACHED_FROM_ROLE' in this pane" >&2
+      echo "  2) pass '--from <role>' explicitly only if intentional" >&2
+      exit 1
+    fi
     echo "Cannot auto-detect --from in any .ai-mailbox upward from $PWD. Either:" >&2
     echo "  1) run ai-pane-register <role> first, or" >&2
     echo "  2) pass --from <role> explicitly" >&2
+    [[ -z "$SESSION_UUID" ]] || echo "  detected session: $SESSION_UUID" >&2
     [[ -z "$SESSION_ERROR" ]] || echo "  $SESSION_ERROR" >&2
+    if [[ -n "$SESSION_UUID" ]] && ! ai_caller_has_tty_ancestor; then
+      echo "  hint: current process has no controlling terminal ancestor; if running inside a shared background daemon (e.g. 'codex app-server' with daemon_auto_start=true), it may be reusing a stale terminal environment from an older window." >&2
+    fi
     echo "" >&2
     echo "Mailbox candidates found:" >&2
     print_mailbox_candidates

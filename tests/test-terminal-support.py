@@ -29,7 +29,7 @@ def setup(tmp_path):
     ps.write_text('''#!/bin/bash
 case "$*" in
   *"-o lstart= -o tty=") printf '%s\\n' "${FAKE_FINGERPRINT:-Fri Nov 13 12:00:00 2026 ttys042}" ;;
-  *"-o ppid= -o tty=") printf '1 %s\\n' "${FAKE_TTY:-ttys042}" ;;
+  *"-o ppid= -o tty=") printf '%s %s\\n' "${FAKE_PPID:-1}" "${FAKE_TTY:-ttys042}" ;;
   *"-o tty=") printf '%s\\n' "${FAKE_TTY:-ttys042}" ;;
   *) exit 1 ;;
 esac
@@ -489,3 +489,84 @@ def test_title_failure_warns_without_aborting_registration(setup, backend, title
     assert (project / ".ai-mailbox/.watch-collgue_a.pid").exists()
     assert "Terminal title set to" not in result.stdout
     assert f"Warning: could not set terminal title to 'collgue_a' ({reason})" in result.stderr
+
+
+@pytest.mark.parametrize("backend", ["terminal", "ghostty", "iterm2"])
+def test_detached_daemon_cannot_spoof_registered_sender_and_reports_stale_session(setup, backend):
+    project, programs, env = setup
+    if backend == "ghostty":
+        configure_ghostty(env)
+    elif backend == "iterm2":
+        env.update(TERM_PROGRAM="iTerm.app", ITERM_SESSION_ID="w0t0p0:iterm-uuid", FAKE_TTY="ttys042")
+
+    info = register(setup, "collgue_a")
+    assert info["terminal_owner_pid"] != ""
+    assert info["terminal_owner_fingerprint"] == FINGERPRINT
+    pane(project, "collgue_c", terminal="ghostty", session_uuid="ghostty:0x0000000000000099")
+
+    # Simulate a shared background daemon (like codex app-server --managed-daemon)
+    # whose PPID chain goes directly to PID 1 rather than collgue_a's terminal_owner_pid.
+    daemon_env = dict(env, FAKE_TTY="??", FAKE_PPID="1")
+
+    def run_detached(cmd, *args):
+        # Prevent '/bin/bash -c' from exec-optimizing a single trailing command,
+        # so ai-ping's PPID is the subshell (not pytest) and fake ps reports PPID=1.
+        quoted = " ".join(f'"{a}"' for a in (str(programs / cmd), *args))
+        return subprocess.run(
+            ["/bin/bash", "-c", f"{quoted}; exit $?"],
+            cwd=project, env=daemon_env, text=True, capture_output=True, timeout=15,
+        )
+
+    whoami = run_detached("ai-ping", "whoami")
+    assert whoami.returncode == 1
+    assert "Refusing auto-detected role 'collgue_a'" in whoami.stderr
+    assert "not a descendant of registered terminal owner pid" in whoami.stderr
+
+    send = run_detached("ai-ping", "collgue_c", "spoof attempt")
+    assert send.returncode == 1
+    assert "Refusing auto-detected --from 'collgue_a'" in send.stderr
+    assert not (project / ".ai-mailbox/inbox/collgue_c").exists()
+
+    doctor = run_detached("ai-ping", "doctor")
+    assert doctor.returncode == 1
+    assert "FAIL 2 current session" in doctor.stdout
+    assert "matches 'collgue_a', but current process is not a descendant" in doctor.stdout
+
+    bare_unreg = run_detached("ai-pane-unregister")
+    assert bare_unreg.returncode == 1
+    assert "Refusing auto-unregister for 'collgue_a'" in bare_unreg.stderr
+    assert (project / ".ai-mailbox/.panes/collgue_a.json").exists()
+
+    # Explicit --from override remains available for intentional recovery.
+    explicit = run_detached("ai-ping", "collgue_c", "--from", "collgue_a", "explicit recovery")
+    assert explicit.returncode == 0, explicit.stderr
+    assert len(list((project / ".ai-mailbox/inbox/collgue_c").glob("*.md"))) == 1
+
+    # Unregistered stale session ID inside a detached daemon reports both the
+    # detected session ID and the shared-daemon hint.
+    stale_env = dict(daemon_env)
+    if backend == "ghostty":
+        stale_env["GHOSTTY_SURFACE_ID"] = "0x6d17306f046b76a2"
+        expected_session = "ghostty:0x6d17306f046b76a2"
+    elif backend == "terminal":
+        stale_env["TERM_SESSION_ID"] = "stale-daemon-session"
+        expected_session = "terminal:stale-daemon-session"
+    else:
+        stale_env["ITERM_SESSION_ID"] = "w0t0p0:stale-daemon-uuid"
+        expected_session = "stale-daemon-uuid"
+
+    stale_whoami = subprocess.run(
+        ["/bin/bash", "-c", f'"{programs / "ai-ping"}" whoami --to collgue_c; exit $?'],
+        cwd=project, env=stale_env, text=True, capture_output=True, timeout=15,
+    )
+    assert stale_whoami.returncode == 1
+    assert f"detected session: {expected_session}" in stale_whoami.stderr
+    assert "no controlling terminal ancestor" in stale_whoami.stderr
+
+    stale_send = subprocess.run(
+        ["/bin/bash", "-c", f'"{programs / "ai-ping"}" collgue_c "hi"; exit $?'],
+        cwd=project, env=stale_env, text=True, capture_output=True, timeout=15,
+    )
+    assert stale_send.returncode == 1
+    assert f"detected session: {expected_session}" in stale_send.stderr
+    assert "no controlling terminal ancestor" in stale_send.stderr

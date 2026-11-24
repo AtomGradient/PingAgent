@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
-# Deterministic watcher test double: emit no events and let the watcher exit
-# after its startup inbox scan.
+# Deterministic watcher test double: emit FAKE_FSWATCH_EMIT if set, else exit
+# after the startup inbox scan.
+if [[ -n "${FAKE_FSWATCH_EMIT:-}" ]]; then
+  printf '%s\0' "$FAKE_FSWATCH_EMIT"
+fi
 exit 0

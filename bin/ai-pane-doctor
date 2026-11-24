@@ -91,6 +91,7 @@ find_mailboxes
 
 SELECTED_MAILBOX=""
 SELECTED_ROLE=""
+SELECTED_PANE_FILE=""
 if [[ -n "$SESSION_UUID" ]]; then
   for ((i = 0; i < MAILBOX_COUNT; i++)); do
     mailbox="${MAILBOXES[$i]}"
@@ -99,6 +100,7 @@ if [[ -n "$SESSION_UUID" ]]; then
       if [[ "$(json_session_uuid "$pane_file")" == "$SESSION_UUID" ]]; then
         SELECTED_MAILBOX="$mailbox"
         SELECTED_ROLE=$(basename "$pane_file" .json)
+        SELECTED_PANE_FILE="$pane_file"
         break
       fi
     done
@@ -137,7 +139,14 @@ fi
 if [[ -z "$SESSION_UUID" ]]; then
   print_result FAIL "2 current session" "$SESSION_ERROR" "run from the registered iTerm2, Terminal, or Ghostty pane; do not guess --from"
 elif [[ -z "$SELECTED_ROLE" ]]; then
-  print_result FAIL "2 current session" "session $SESSION_UUID is not registered in any upward mailbox" "run ai-pane-register <role> from the intended project root"
+  if ! ai_caller_has_tty_ancestor; then
+    print_result FAIL "2 current session" "session $SESSION_UUID is not registered in any upward mailbox (caller has no controlling terminal ancestor; likely running inside a detached background daemon with a stale terminal environment)" "stop shared background daemon (e.g. codex app-server daemon stop; set daemon_auto_start=false) and run ai-pane-register <role> in the terminal pane"
+  else
+    print_result FAIL "2 current session" "session $SESSION_UUID is not registered in any upward mailbox" "run ai-pane-register <role> from the intended project root"
+  fi
+elif ! ai_pane_owner_matches_caller "$SELECTED_PANE_FILE"; then
+  selected_owner_pid=$(ai_pane_field "$SELECTED_PANE_FILE" terminal_owner_pid)
+  print_result FAIL "2 current session" "session $SESSION_UUID matches '$SELECTED_ROLE', but current process is not a descendant of registered terminal owner pid $selected_owner_pid (detached daemon or stale pane)" "stop shared background daemon (e.g. codex app-server daemon stop; set daemon_auto_start=false) or re-run ai-pane-register $SELECTED_ROLE in this pane"
 else
   print_result OK "2 current session" "session $SESSION_UUID registered as '$SELECTED_ROLE'" "none"
 fi

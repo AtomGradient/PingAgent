@@ -99,4 +99,26 @@ sidecar="$case_root/.ai-mailbox/inbox/receiver/unexpected-response.md.dispatched
 grep -q 'reason=unexpected_osascript_response' "$case_root/watcher.log" || fail "unexpected response classification"
 pass "only the explicit ok response confirms injection"
 
+case_root="$TEST_ROOT/real-project"
+symlink_root="$TEST_ROOT/symlink-project"
+mkdir -p "$case_root/.ai-mailbox/.panes" "$case_root/.ai-mailbox/inbox/receiver"
+ln -s "$case_root" "$symlink_root"
+printf '%s\n' '{"session_uuid":"fake-session"}' > "$case_root/.ai-mailbox/.panes/receiver.json"
+real_inbox="$(cd "$case_root/.ai-mailbox/inbox/receiver" && pwd -P)"
+# Create message inside custom fswatch so startup scan sees an empty inbox and only fswatch's physical path triggers dispatch.
+mkdir -p "$case_root/custom-bin"
+cat > "$case_root/custom-bin/fswatch" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' '---' 'id: symlink-msg' 'from: sender' 'to: receiver' 'kind: msg' '---' '' 'hello' > "$real_inbox/symlink-msg.md"
+printf '%s\0' "$real_inbox/symlink-msg.md"
+EOF
+chmod +x "$case_root/custom-bin/fswatch"
+PATH="$case_root/custom-bin:$FIXTURE_BIN:$PATH" \
+  AI_COLLAB_OSASCRIPT_BIN="$FIXTURE_BIN/osascript" \
+  FAKE_OSASCRIPT_MODE="success" \
+  FAKE_OSASCRIPT_CALLS="$case_root/osascript.calls" \
+  "$WATCHER" receiver "$symlink_root/.ai-mailbox" > "$case_root/watcher.log" 2>&1
+[[ -f "$real_inbox/symlink-msg.md.dispatched" ]] || fail "fswatch physical path under symlinked mailbox must dispatch"
+pass "fswatch physical FSEvents path dispatches when mailbox path is symlinked"
+
 printf '1..%d\n' "$pass_count"

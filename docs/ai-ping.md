@@ -134,7 +134,8 @@ watcher 只有在 osascript 以 0 退出且返回精确 `ok` 时才写 `<msg>.md
 
 | 错误信息 | 原因 | 解决 |
 |---|---|---|
-| `Cannot auto-detect --from` | 当前 pane 没注册 / 终端 session 环境变量缺失 | 在原终端直接跑 `ai-pane-register <role>`，确认 AI 子进程继承了会话环境 |
+| `Cannot auto-detect --from` / `Current session is not registered` | 当前 pane 没注册 / 共享后台 daemon 复用了旧窗口环境变量 | 在原终端直接跑 `ai-pane-register <role>`；若使用 Codex `0.172+`，执行 `codex app-server daemon stop` 并在 `~/.codex/config.toml` 设 `daemon_auto_start = false` |
+| `Refusing auto-detected role` | 环境变量命中已注册 role，但当前命令跑在脱离该终端 `terminal_owner_pid` 的后台守护进程里 | 停止跨窗口共享 daemon（防止多窗口发件身份串号），或在当前终端重跑 `ai-pane-register <role>` |
 | `GHOSTTY_SURFACE_ID is missing or invalid` | Ghostty 版本过旧或子进程未继承身份 | 使用 macOS Ghostty 1.4.0+，升级后打开新 pane；确认继承 `$TERM_PROGRAM` / `$GHOSTTY_SURFACE_ID` |
 | `Cannot locate Ghostty pane` | 当前 TTY 不属于 Ghostty / AppleScript 不可用 | 在原生 Ghostty pane 的 shell 中注册，启用 `macos-applescript` 并允许 Automation 权限 |
 | `No .ai-mailbox/ found upward from ...` | 当前目录不在已 register 过的项目下 | `cd <project>` 或确认 register 跑过 |

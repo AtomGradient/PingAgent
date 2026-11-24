@@ -41,13 +41,20 @@ pane_session_uuid() {
 }
 
 role_for_session_in_mailbox() {
-  local mailbox="$1" session_uuid="$2" f
+  local mailbox="$1" session_uuid="$2" f r
   DETECTED_ROLE=""
   for f in "$mailbox/.panes/"*.json; do
     [[ -f "$f" ]] || continue
     if pane_file_has_session "$f" "$session_uuid"; then
-      DETECTED_ROLE=$(basename "$f" .json)
-      return 0
+      r=$(basename "$f" .json)
+      if ai_pane_owner_matches_caller "$f"; then
+        DETECTED_ROLE="$r"
+        return 0
+      elif [[ -z "${DETACHED_ROLE:-}" ]]; then
+        DETACHED_ROLE="$r"
+        DETACHED_MAILBOX="$mailbox"
+        DETACHED_OWNER_PID=$(ai_pane_field "$f" terminal_owner_pid)
+      fi
     fi
   done
   return 1
@@ -118,6 +125,9 @@ ai_detect_terminal
 NEAREST_MAILBOX=$(find_nearest_mailbox || true)
 MAILBOX=""
 DETECTED_ROLE=""
+DETACHED_ROLE=""
+DETACHED_MAILBOX=""
+DETACHED_OWNER_PID=""
 
 if [[ -z "$NEAREST_MAILBOX" ]]; then
   echo "No .ai-mailbox/ found upward from $PWD" >&2
@@ -127,9 +137,15 @@ fi
 # 自动检测 role（从当前终端 session id）
 if [[ -z "$ROLE" ]]; then
   if [[ -z "$SESSION_UUID" ]] || ! select_mailbox_for_current_session; then
+    if [[ -n "$DETACHED_ROLE" ]]; then
+      echo "Refusing auto-unregister for '$DETACHED_ROLE' in $DETACHED_MAILBOX: current process is not a descendant of registered terminal owner pid $DETACHED_OWNER_PID (session $SESSION_UUID)." >&2
+      echo "  Pass 'ai-pane-unregister $DETACHED_ROLE' explicitly if you intend to unregister that pane." >&2
+      exit 1
+    fi
     echo "Cannot auto-detect role in any .ai-mailbox upward from $PWD. Either:" >&2
     echo "  1) pass <role> explicitly: ai-pane-unregister <role>" >&2
     echo "  2) run from the same iTerm2, Terminal, or Ghostty pane that ran ai-pane-register" >&2
+    [[ -z "$SESSION_UUID" ]] || echo "  detected session: $SESSION_UUID" >&2
     [[ -z "$SESSION_ERROR" ]] || echo "  $SESSION_ERROR" >&2
     echo "" >&2
     echo "Currently registered:" >&2

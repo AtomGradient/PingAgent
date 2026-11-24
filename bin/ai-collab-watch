@@ -28,7 +28,11 @@ TERMINAL_BACKEND="${TERMINAL_BACKEND:-iterm2}"
 TERMINAL_TTY=""
 TERMINAL_WINDOW_ID=""
 case "$TERMINAL_BACKEND" in
-  iterm2) ;;
+  iterm2)
+    TERMINAL_TTY=$(ai_pane_field "$PANES_FILE" terminal_tty)
+    TERMINAL_OWNER_PID=$(ai_pane_field "$PANES_FILE" terminal_owner_pid)
+    TERMINAL_OWNER_FINGERPRINT=$(ai_pane_field "$PANES_FILE" terminal_owner_fingerprint)
+    ;;
   terminal|ghostty)
     TERMINAL_TTY=$(ai_pane_field "$PANES_FILE" terminal_tty)
     TERMINAL_OWNER_PID=$(ai_pane_field "$PANES_FILE" terminal_owner_pid)
@@ -65,6 +69,7 @@ fi
 
 INBOX="$MAILBOX/inbox/$ROLE"
 mkdir -p "$INBOX"
+INBOX_REAL="$(cd "$INBOX" && pwd -P)"
 
 # 收到信号时把 fswatch 等子进程一起带走（避免孤儿）。
 # 不 trap HUP：让 nohup 启动的 watcher 在父 shell 退出时正常存活。
@@ -252,6 +257,27 @@ process_file() {
 
 log "ai-collab-watch starting: role=$ROLE mailbox=$MAILBOX terminal=$TERMINAL_BACKEND session=$SESSION_UUID"
 
+# macOS Terminal 与 iTerm2 的标题在 ai-pane-register 退出回到 shell 提示符（如 Oh My Zsh precmd）
+# 或启动 TUI 时会被 OSC 0/1/2 覆盖；Ghostty 的 name override 原生持久无需轮询。
+if [[ "${AI_COLLAB_KEEP_TITLE:-}" == "1" && ( "$TERMINAL_BACKEND" == "terminal" || "$TERMINAL_BACKEND" == "iterm2" ) ]]; then
+  (
+    for delay_sec in 0.6 0.8 1.0 1.5 2.0; do
+      sleep "$delay_sec"
+      if [[ -n "${TERMINAL_OWNER_PID:-}" && -n "${TERMINAL_OWNER_FINGERPRINT:-}" ]]; then
+        [[ "$(ai_process_fingerprint "$TERMINAL_OWNER_PID" 2>/dev/null || true)" == "$TERMINAL_OWNER_FINGERPRINT" ]] || exit 0
+      fi
+      ai_set_pane_title "$ROLE" >/dev/null 2>&1 || true
+    done
+    while true; do
+      sleep 5
+      if [[ -n "${TERMINAL_OWNER_PID:-}" && -n "${TERMINAL_OWNER_FINGERPRINT:-}" ]]; then
+        [[ "$(ai_process_fingerprint "$TERMINAL_OWNER_PID" 2>/dev/null || true)" == "$TERMINAL_OWNER_FINGERPRINT" ]] || exit 0
+      fi
+      ai_set_pane_title "$ROLE" >/dev/null 2>&1 || exit 0
+    done
+  ) &
+fi
+
 # 启动时扫描一次（处理 watcher 启动前已到达的消息）
 for f in "$INBOX"/*.md; do
   [[ -f "$f" ]] || continue
@@ -263,8 +289,8 @@ if command -v fswatch >/dev/null 2>&1; then
   log "using fswatch (event-driven)"
   # -0: NUL-terminated paths; 监听整个 inbox 目录
   while IFS= read -r -d "" path; do
-    # fswatch 的 path 可能是目录或文件；只处理 inbox 下的 .md
-    if [[ "$path" == "$INBOX"/*.md ]]; then
+    # fswatch (macOS FSEvents) 返回物理路径；同时兼容符号链接路径与真实路径
+    if [[ "$path" == "$INBOX"/*.md || "$path" == "$INBOX_REAL"/*.md ]]; then
       process_file "$path"
     fi
   done < <(fswatch -0 "$INBOX")

@@ -67,6 +67,79 @@ ai_process_fingerprint() {
   LC_ALL=C ps -p "$1" -o lstart= -o tty= | awk '{$1=$1; print}'
 }
 
+ai_try_resolve_terminal_process() {
+  local terminal_device owner_pid parent_info parent_pid parent_tty fingerprint
+  terminal_device=$(ps -p $$ -o tty= 2>/dev/null | tr -d '[:space:]' || true)
+  [[ "$terminal_device" =~ ^ttys[0-9]+$ ]] || return 0
+  owner_pid="$PPID"
+  while [[ "$owner_pid" =~ ^[0-9]+$ && "$owner_pid" -gt 1 ]]; do
+    parent_info=$(ps -p "$owner_pid" -o ppid= -o tty= 2>/dev/null) || break
+    read -r parent_pid parent_tty <<< "$parent_info"
+    [[ "$parent_tty" == "$terminal_device" ]] || break
+    TERMINAL_OWNER_PID="$owner_pid"
+    [[ "$parent_pid" != "$owner_pid" ]] || break
+    owner_pid="$parent_pid"
+  done
+  [[ -n "$TERMINAL_OWNER_PID" ]] || return 0
+  fingerprint=$(ai_process_fingerprint "$TERMINAL_OWNER_PID" 2>/dev/null || true)
+  if [[ -z "$fingerprint" ]]; then
+    TERMINAL_OWNER_PID=""
+    return 0
+  fi
+  TERMINAL_TTY="/dev/$terminal_device"
+  TERMINAL_OWNER_FINGERPRINT="$fingerprint"
+}
+
+ai_pid_is_ancestor_of_self() {
+  local target_pid="$1" target_fingerprint="$2" cur_pid parent_info next_pid cur_tty depth
+  [[ "$target_pid" =~ ^[0-9]+$ && -n "$target_fingerprint" ]] || return 1
+  if [[ "$(ai_process_fingerprint "$target_pid" 2>/dev/null || true)" != "$target_fingerprint" ]]; then
+    return 1
+  fi
+  if [[ "$$" == "$target_pid" || "${PPID:-}" == "$target_pid" ]]; then
+    return 0
+  fi
+  cur_pid="${PPID:-}"
+  depth=0
+  while [[ "$cur_pid" =~ ^[0-9]+$ && "$cur_pid" -gt 1 && "$depth" -lt 64 ]]; do
+    [[ "$cur_pid" == "$target_pid" ]] && return 0
+    parent_info=$(ps -p "$cur_pid" -o ppid= -o tty= 2>/dev/null) || break
+    read -r next_pid cur_tty <<< "$parent_info"
+    [[ "$next_pid" =~ ^[0-9]+$ && "$next_pid" != "$cur_pid" ]] || break
+    [[ "$next_pid" == "$target_pid" ]] && return 0
+    cur_pid="$next_pid"
+    depth=$((depth + 1))
+  done
+  return 1
+}
+
+ai_pane_owner_matches_caller() {
+  local pane_file="$1" owner_pid owner_fingerprint
+  owner_pid=$(ai_pane_field "$pane_file" terminal_owner_pid)
+  owner_fingerprint=$(ai_pane_field "$pane_file" terminal_owner_fingerprint)
+  # Backward compatibility: legacy records without owner process metadata match by session_uuid.
+  if [[ -z "$owner_pid" || -z "$owner_fingerprint" ]]; then
+    return 0
+  fi
+  ai_pid_is_ancestor_of_self "$owner_pid" "$owner_fingerprint"
+}
+
+ai_caller_has_tty_ancestor() {
+  local cur_pid parent_info next_pid cur_tty depth=0
+  cur_tty=$(ps -p "$$" -o tty= 2>/dev/null | tr -d '[:space:]' || true)
+  [[ "$cur_tty" =~ ^ttys[0-9]+$ ]] && return 0
+  cur_pid="${PPID:-}"
+  while [[ "$cur_pid" =~ ^[0-9]+$ && "$cur_pid" -gt 1 && "$depth" -lt 64 ]]; do
+    parent_info=$(ps -p "$cur_pid" -o ppid= -o tty= 2>/dev/null) || break
+    read -r next_pid cur_tty <<< "$parent_info"
+    [[ "$cur_tty" =~ ^ttys[0-9]+$ ]] && return 0
+    [[ "$next_pid" =~ ^[0-9]+$ && "$next_pid" != "$cur_pid" ]] || break
+    cur_pid="$next_pid"
+    depth=$((depth + 1))
+  done
+  return 1
+}
+
 ai_resolve_terminal_process() {
   local label="$1" terminal_device owner_pid parent_info parent_pid parent_tty
   # ps works even when stdin is piped. Registration must run in the actual
@@ -187,8 +260,13 @@ on run argv
       if id of aWindow is targetWindow then
         repeat with aTab in tabs of aWindow
           if tty of aTab is targetTTY then
-            set custom title of aTab to targetTitle
-            set title displays custom title of aTab to true
+            set curTitle to (custom title of aTab) as text
+            if curTitle is not targetTitle then
+              set custom title of aTab to targetTitle
+            end if
+            if (title displays custom title of aTab) is false then
+              set title displays custom title of aTab to true
+            end if
             return "ok"
           end if
         end repeat
@@ -239,7 +317,11 @@ on run argv
       repeat with aTab in tabs of aWindow
         repeat with aSession in sessions of aTab
           if id of aSession is targetID then
-            set name of aSession to targetTitle
+            set curName to (name of aSession) as text
+            if curName is not targetTitle and curName does not start with (targetTitle & " (") then
+              set name of aSession to ""
+              set name of aSession to targetTitle
+            end if
             return "ok"
           end if
         end repeat

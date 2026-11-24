@@ -205,8 +205,9 @@ echo "..." | ai-ping <to>                                  # stdin
 **消息被重复触发**：
 - 先看 watcher 日志。失败投递不会创建 `.dispatched`；没有 fswatch、使用轮询回退时会继续尝试。不要为“修复”而批量删除已有 sidecar，只对已确认需要重发的单条消息操作
 
-**`ai-ping` 提示 `Cannot auto-detect --from`**：
-- 你不在已注册的 pane 里。要么去注册过的 pane 里跑，要么 `ai-ping ... --from <role>` 显式传
+**`ai-ping` 提示 `Cannot auto-detect --from` / `Current session is not registered` / `Refusing auto-detected role`**：
+- 你不在已注册的 pane 里，或当前 Agent 把工具命令交给了跨窗口共享的后台守护进程执行（例如 Codex `0.172+` 默认开启 `daemon_auto_start = true`，多个窗口共用同一个 `codex app-server --managed-daemon`，导致子进程携带守护进程首次启动时的过期终端环境变量）
+- 对 Codex：执行 `codex app-server daemon stop`，并在 `~/.codex/config.toml` 的 `[features]` 下设置 `daemon_auto_start = false`（或启动时加 `--disable daemon_auto_start`），让每个 pane 独立持有本窗口会话环境；应急单次补发可显式传 `ai-ping ... --from <role>`
 
 **提示 `target '<role>' is not registered in selected mailbox`，但又说另一个 mailbox 里注册了该 role**：
 - 两个 pane 很可能注册到了不同项目目录。分别在两个 pane 里 `cd` 到同一个项目根目录，重新执行 `ai-pane-register <role>`

@@ -209,8 +209,9 @@ Full kind table, parameter reference, error catalog, end-to-end review example: 
 **A message gets re-dispatched repeatedly:**
 - Inspect the watcher log first. Failed delivery intentionally leaves no `.dispatched` sidecar; the polling fallback (when fswatch is unavailable) will retry. Do not bulk-delete existing sidecars—operate only on a message you have confirmed should be resent
 
-**`ai-ping` says `Cannot auto-detect --from`:**
-- You're running it from a pane that was never registered. Either run from a registered pane, or pass `--from <role>` explicitly
+**`ai-ping` says `Cannot auto-detect --from` / `Current session is not registered` / `Refusing auto-detected role`:**
+- Either this pane was never registered, or the Agent executed `ai-ping` inside a shared cross-window background daemon (for example, Codex `0.172+` enables `daemon_auto_start = true` by default so every window shares one `codex app-server --managed-daemon` process carrying stale terminal environment variables from whichever window launched the daemon)
+- For Codex: run `codex app-server daemon stop` and set `daemon_auto_start = false` under `[features]` in `~/.codex/config.toml` (or launch with `--disable daemon_auto_start`) so each pane keeps its own terminal session environment; pass `--from <role>` explicitly only for one-off recovery
 
 **It says `target '<role>' is not registered in selected mailbox`, but another mailbox has that role:**
 - The two panes were likely registered from different project directories. In both panes, `cd` to the same project root and run `ai-pane-register <role>` again

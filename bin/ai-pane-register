@@ -37,6 +37,8 @@ if [[ "$TERMINAL_BACKEND" == "terminal" ]]; then
   ai_resolve_terminal_tab
 elif [[ "$TERMINAL_BACKEND" == "ghostty" ]]; then
   ai_resolve_ghostty_terminal
+elif [[ "$TERMINAL_BACKEND" == "iterm2" ]]; then
+  ai_try_resolve_terminal_process
 fi
 
 find_parent_mailbox() {
@@ -128,8 +130,8 @@ if [[ -n "$EXISTING" ]]; then
 fi
 rm -f "$WATCH_PID_FILE"
 
-# 起新 watcher
-nohup "$SCRIPT_DIR/ai-collab-watch" "$ROLE" "$MAILBOX" >> "$WATCH_LOG" 2>&1 &
+# 起新 watcher（Terminal / iTerm2 的标题易被 zsh precmd 或 TUI OSC 覆盖，由 watcher 守护保持）
+AI_COLLAB_KEEP_TITLE=1 nohup "$SCRIPT_DIR/ai-collab-watch" "$ROLE" "$MAILBOX" >> "$WATCH_LOG" 2>&1 &
 WATCH_PID=$!
 echo "$WATCH_PID" > "$WATCH_PID_FILE"
 disown 2>/dev/null || true
