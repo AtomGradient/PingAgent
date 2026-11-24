@@ -160,3 +160,119 @@ end run
   fi
   GHOSTTY_TERMINAL_ID="$output"
 }
+
+ai_set_pane_title() {
+  local title="$1" osascript_bin script output exit_code
+  local -a target_args
+  TITLE_ERROR=""
+  osascript_bin="${AI_COLLAB_OSASCRIPT_BIN:-/usr/bin/osascript}"
+  if [[ ! -x "$osascript_bin" ]]; then
+    TITLE_ERROR="osascript_not_found"
+    return 1
+  fi
+  case "$TERMINAL_BACKEND" in
+    terminal)
+      if [[ -z "${TERMINAL_WINDOW_ID:-}" || -z "${TERMINAL_TTY:-}" ]]; then
+        TITLE_ERROR="missing_terminal_target"
+        return 1
+      fi
+      script='
+on run argv
+  set targetWindow to item 1 of argv as integer
+  set targetTTY to item 2 of argv
+  set targetTitle to item 3 of argv
+  if not (application "Terminal" is running) then return "session not found: " & targetTTY
+  tell application "Terminal"
+    repeat with aWindow in windows
+      if id of aWindow is targetWindow then
+        repeat with aTab in tabs of aWindow
+          if tty of aTab is targetTTY then
+            set custom title of aTab to targetTitle
+            set title displays custom title of aTab to true
+            return "ok"
+          end if
+        end repeat
+      end if
+    end repeat
+  end tell
+  return "session not found: " & targetTTY
+end run
+'
+      target_args=("$TERMINAL_WINDOW_ID" "$TERMINAL_TTY" "$title")
+      ;;
+    ghostty)
+      if [[ -z "${GHOSTTY_TERMINAL_ID:-}" || -z "${TERMINAL_TTY:-}" ]]; then
+        TITLE_ERROR="missing_ghostty_target"
+        return 1
+      fi
+      script='
+on run argv
+  set targetID to item 1 of argv
+  set targetTTY to item 2 of argv
+  set targetTitle to item 3 of argv
+  if not (application "Ghostty" is running) then return "session not found: " & targetID
+  tell application "Ghostty"
+    repeat with aTerminal in terminals
+      if id of aTerminal is targetID and tty of aTerminal is targetTTY then
+        set name override of aTerminal to targetTitle
+        return "ok"
+      end if
+    end repeat
+  end tell
+  return "session not found: " & targetID
+end run
+'
+      target_args=("$GHOSTTY_TERMINAL_ID" "$TERMINAL_TTY" "$title")
+      ;;
+    iterm2)
+      if [[ -z "${SESSION_UUID:-}" ]]; then
+        TITLE_ERROR="missing_iterm_session"
+        return 1
+      fi
+      script='
+on run argv
+  set targetID to item 1 of argv
+  set targetTitle to item 2 of argv
+  if not (application "iTerm2" is running) then return "session not found: " & targetID
+  tell application "iTerm2"
+    repeat with aWindow in windows
+      repeat with aTab in tabs of aWindow
+        repeat with aSession in sessions of aTab
+          if id of aSession is targetID then
+            set name of aSession to targetTitle
+            return "ok"
+          end if
+        end repeat
+      end repeat
+    end repeat
+    return "session not found: " & targetID
+  end tell
+end run
+'
+      target_args=("$SESSION_UUID" "$title")
+      ;;
+    *)
+      TITLE_ERROR="unsupported_terminal_backend"
+      return 1
+      ;;
+  esac
+
+  if output=$("$osascript_bin" -e "$script" -- "${target_args[@]}" 2>&1); then
+    exit_code=0
+  else
+    exit_code=$?
+  fi
+  if [[ "$exit_code" -eq 0 && "$output" == "ok" ]]; then
+    return 0
+  fi
+  if [[ "$output" == *"session not found:"* ]]; then
+    TITLE_ERROR="session_not_found"
+  elif [[ "$output" == *"(-1743)"* || "$output" == *"error number -1743"* ]]; then
+    TITLE_ERROR="automation_denied_-1743"
+  elif [[ "$exit_code" -ne 0 ]]; then
+    TITLE_ERROR="osascript_exit_$exit_code"
+  else
+    TITLE_ERROR="unexpected_osascript_response"
+  fi
+  return 1
+}

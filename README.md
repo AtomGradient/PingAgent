@@ -92,10 +92,11 @@ ai-pane-register antigravity
 agy                  # launch Google Antigravity CLI
 ```
 
-`ai-pane-register` does three things:
+`ai-pane-register` does four things:
 1. Detects the terminal and saves its identity and delivery target into `.ai-mailbox/.panes/<role>.json`: the UUID from `$ITERM_SESSION_ID` for iTerm2; `$TERM_SESSION_ID` plus window ID, TTY, and session process for Terminal; `$GHOSTTY_SURFACE_ID` plus AppleScript terminal ID, TTY, and session process for Ghostty
 2. Starts `ai-collab-watch <role>` in the background (log: `.ai-mailbox/.watch-<role>.log`)
 3. Cleans up any old watcher for the same role+mailbox, then starts a fresh watcher
+4. Sets the current terminal session/tab title to `<role>` (iTerm2 session `name`, Terminal tab `custom title`, Ghostty terminal `name override`) so panes stay easy to tell apart
 
 Run `ai-pane-register` from the project root. If an ancestor directory already has `.ai-mailbox/`, `ai-pane-register` warns that the current command will use or create a nested mailbox; in most cases you should `cd` back to the ancestor project root instead.
 

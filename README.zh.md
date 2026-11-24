@@ -91,10 +91,11 @@ ai-pane-register antigravity
 agy                  # 启动 Google Antigravity CLI
 ```
 
-`ai-pane-register` 做三件事：
+`ai-pane-register` 做四件事：
 1. 自动识别终端，把会话身份和通知目标存到 `.ai-mailbox/.panes/<role>.json`：iTerm2 使用 `$ITERM_SESSION_ID` 的 UUID；Terminal 使用 `$TERM_SESSION_ID`，同时记录窗口 ID、TTY 和会话进程；Ghostty 使用 `$GHOSTTY_SURFACE_ID`，同时记录 AppleScript 终端 ID、TTY 和会话进程
 2. 启动 `ai-collab-watch <role>` 后台进程（log 在 `.ai-mailbox/.watch-<role>.log`）
 3. 清理同一 role+mailbox 的旧 watcher，再启动新的 watcher
+4. 自动将当前终端会话/标签页的标题修改为 `<role>`（iTerm2 session `name`、Terminal tab `custom title`、Ghostty terminal `name override`），方便多窗口区分
 
 建议在项目根目录执行 `ai-pane-register`。如果当前目录的上层已经有 `.ai-mailbox/`，`ai-pane-register` 会提示你正在使用或创建一套嵌套 mailbox；这通常意味着你应该先 `cd` 回上层项目根目录。
 

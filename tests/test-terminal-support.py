@@ -177,7 +177,20 @@ def test_iterm_registration_does_not_need_terminal_automation(setup):
     assert info["terminal"] == "iterm2"
     assert info["session_uuid"] == "iterm-uuid"
     assert info["terminal_tty"] == ""
-    assert not Path(env["FAKE_OSASCRIPT_CALLS"]).exists()
+    calls = Path(env["FAKE_OSASCRIPT_CALLS"])
+    invocation = calls.read_text()
+    assert 'tell application "Terminal"' not in invocation
+    assert 'tell application "Ghostty"' not in invocation
+    assert 'tell application "iTerm2"' in invocation
+    assert "set name of aSession to targetTitle" in invocation
+    assert "arg=iterm-uuid\narg=iterm_one\n" in invocation
+
+    # Even if iTerm2 Automation is denied, iTerm2 registration itself still succeeds.
+    calls.unlink()
+    env["FAKE_OSASCRIPT_MODE"] = "tcc_denied"
+    denied = run(programs, project, env, "ai-pane-register", "iterm_one")
+    assert denied.returncode == 0, denied.stderr
+    assert "Warning: could not set terminal title to 'iterm_one' (automation_denied_-1743)" in denied.stderr
 
 
 @pytest.mark.parametrize("mode,reason", [
@@ -419,3 +432,60 @@ def test_whoami_fast_lookup_nested_mailbox_and_reserved_role(setup):
     disambig = run(programs, nested, env, "ai-ping", "whoami", "--to", "peer_root")
     assert disambig.returncode == 0, disambig.stderr
     assert disambig.stdout.strip() == "collgue_a"
+
+
+@pytest.mark.parametrize("role", ["collgue_a", "-collgue-125"])
+@pytest.mark.parametrize("backend", ["terminal", "ghostty", "iterm2"])
+def test_register_sets_terminal_title_for_all_backends(setup, backend, role):
+    project, programs, env = setup
+    if backend == "ghostty":
+        configure_ghostty(env)
+    elif backend == "iterm2":
+        env.update(TERM_PROGRAM="iTerm.app", ITERM_SESSION_ID="w0t0p0:iterm-uuid", FAKE_TTY="??")
+
+    result = run(programs, project, env, "ai-pane-register", role)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert f"Terminal title set to '{role}'\n" in result.stdout
+    assert result.stderr == ""
+
+    invocation = Path(env["FAKE_OSASCRIPT_CALLS"]).read_text()
+    if backend == "terminal":
+        assert 'tell application "Terminal"' in invocation
+        assert "set custom title of aTab to targetTitle" in invocation
+        assert "set title displays custom title of aTab to true" in invocation
+        assert f"arg=42\narg=/dev/ttys042\narg={role}\n" in invocation
+        assert "selected" not in invocation
+    elif backend == "ghostty":
+        assert 'tell application "Ghostty"' in invocation
+        assert "set name override of aTerminal to targetTitle" in invocation
+        assert "id of aTerminal is targetID and tty of aTerminal is targetTTY" in invocation
+        assert f"arg={GHOSTTY_TERMINAL_ID}\narg=/dev/ttys042\narg={role}\n" in invocation
+        assert "focused terminal" not in invocation
+    else:
+        assert 'tell application "iTerm2"' in invocation
+        assert "set name of aSession to targetTitle" in invocation
+        assert "id of aSession is targetID" in invocation
+        assert f"arg=iterm-uuid\narg={role}\n" in invocation
+        assert "current session" not in invocation
+
+
+@pytest.mark.parametrize("title_mode,reason", [
+    ("session_missing", "session_not_found"),
+    ("tcc_denied", "automation_denied_-1743"),
+    ("unexpected_success", "unexpected_osascript_response"),
+])
+@pytest.mark.parametrize("backend", ["terminal", "ghostty", "iterm2"])
+def test_title_failure_warns_without_aborting_registration(setup, backend, title_mode, reason):
+    project, programs, env = setup
+    if backend == "ghostty":
+        configure_ghostty(env)
+    elif backend == "iterm2":
+        env.update(TERM_PROGRAM="iTerm.app", ITERM_SESSION_ID="w0t0p0:iterm-uuid", FAKE_TTY="??")
+    env["FAKE_OSASCRIPT_TITLE_MODE"] = title_mode
+
+    result = run(programs, project, env, "ai-pane-register", "collgue_a")
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (project / ".ai-mailbox/.panes/collgue_a.json").exists()
+    assert (project / ".ai-mailbox/.watch-collgue_a.pid").exists()
+    assert "Terminal title set to" not in result.stdout
+    assert f"Warning: could not set terminal title to 'collgue_a' ({reason})" in result.stderr

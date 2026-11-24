@@ -6,7 +6,21 @@ for arg in "$@"; do
   printf 'arg=%s\n' "$arg" >> "$FAKE_OSASCRIPT_CALLS"
 done
 
-case "${FAKE_OSASCRIPT_MODE:-success}" in
+script="${2:-}"
+mode="${FAKE_OSASCRIPT_MODE:-success}"
+if [[ "$script" == *"set custom title"* || "$script" == *"set name override"* || "$script" == *"set name of aSession"* ]]; then
+  if [[ -n "${FAKE_OSASCRIPT_TITLE_MODE:-}" ]]; then
+    mode="$FAKE_OSASCRIPT_TITLE_MODE"
+  else
+    case "$mode" in
+      terminal_registration|ghostty_registration|success)
+        mode="success"
+        ;;
+    esac
+  fi
+fi
+
+case "$mode" in
   terminal_registration)
     printf '42\n'
     ;;

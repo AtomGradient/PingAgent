@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ai-pane-register <role>
-# 注册当前 iTerm2 / macOS Terminal / Ghostty pane，并启动 watcher。
+# 注册当前 iTerm2 / macOS Terminal / Ghostty pane，将终端标题设为 <role>，并启动 watcher。
 # 在每个 pane 启动两个 AI 之前各跑一次。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -143,6 +143,12 @@ fi
 # 不在这里做 pgrep count（process substitution 的 subshell 会让计数翻倍误报）；
 # orphan 防护由前面的预先 pkill 负责。
 echo "Watcher started (pid $WATCH_PID, log $WATCH_LOG)"
+
+if ai_set_pane_title "$ROLE"; then
+  printf "Terminal title set to '%s'\n" "$ROLE"
+else
+  printf "Warning: could not set terminal title to '%s' (%s)\n" "$ROLE" "${TITLE_ERROR:-unknown}" >&2
+fi
 
 # .gitignore reminder
 GITIGNORE="$PWD/.gitignore"
