@@ -124,7 +124,7 @@ ai-ping antigravity "test: do you see this?"
 Expected: the antigravity pane's input area auto-receives:
 
 ```
-[ai-collab inbox] from=codex kind=msg id=... | please Read .ai-mailbox/inbox/antigravity/...md and follow its instructions; reply with ai-ping codex --reply-to <id> --file <your-reply.md>
+[ai-collab inbox] from=codex to=antigravity kind=msg id=... | please Read .ai-mailbox/inbox/antigravity/...md and follow its instructions; reply with ai-ping codex --reply-to <id> --file <your-reply.md>
 ```
 
 > **Note**: the actual notification text is currently in Chinese (`[ai-collab 收信]` …). Both Codex and Google Antigravity handle the bilingual flow fluently. If you want it fully English, edit the notification template near the bottom of `bin/ai-collab-watch`.

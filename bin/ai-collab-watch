@@ -238,9 +238,9 @@ process_file() {
   # 构造给 AI 的通知（一行，避免在 TUI 输入框里换行）
   local notif
   if [[ -n "$reply_to" ]]; then
-    notif="[ai-collab 收信] from=$sender kind=$kind id=$id reply_to=$reply_to | 请 Read $rel_path 并按其中说明处理；这是对你之前消息(id=$reply_to)的回复"
+    notif="[ai-collab 收信] from=$sender to=$ROLE kind=$kind id=$id reply_to=$reply_to | 请 Read $rel_path 并按其中说明处理；这是对你之前消息(id=$reply_to)的回复"
   else
-    notif="[ai-collab 收信] from=$sender kind=$kind id=$id | 请 Read $rel_path 并按其中说明处理；处理完用 ai-ping $sender --reply-to $id --file <你的回复.md>"
+    notif="[ai-collab 收信] from=$sender to=$ROLE kind=$kind id=$id | 请 Read $rel_path 并按其中说明处理；处理完用 ai-ping $sender --reply-to $id --file <你的回复.md>"
   fi
 
   log "dispatching: $fname (from=$sender, kind=$kind)"

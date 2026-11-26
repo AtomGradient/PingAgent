@@ -123,7 +123,7 @@ ai-ping antigravity "测试消息：你能看到这条吗？"
 预期：antigravity 那个 pane 的输入框里**自动出现并提交**：
 
 ```
-[ai-collab 收信] from=codex kind=msg id=... | 请 Read .ai-mailbox/inbox/antigravity/...md 并按其中说明处理...
+[ai-collab 收信] from=codex to=antigravity kind=msg id=... | 请 Read .ai-mailbox/inbox/antigravity/...md 并按其中说明处理...
 ```
 
 antigravity 应该 Read 那个文件、然后用 `ai-ping codex --reply-to <id> "..."` 回执，codex pane 也会收到通知。

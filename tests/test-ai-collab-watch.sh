@@ -65,7 +65,7 @@ run_watcher success "$case_root"
 sidecar="$case_root/.ai-mailbox/inbox/receiver/normal-injection.md.dispatched"
 [[ -f "$sidecar" ]] || fail "normal injection creates dispatched sidecar"
 grep -q '^arg=fake-session$' "$case_root/osascript.calls" || fail "normal injection targets the registered session"
-grep -q '^arg=\[ai-collab 收信\] from=sender kind=msg id=normal-injection ' "$case_root/osascript.calls" || fail "normal injection passes the mailbox pointer notification"
+grep -q '^arg=\[ai-collab 收信\] from=sender to=receiver kind=msg id=normal-injection ' "$case_root/osascript.calls" || fail "normal injection includes the recipient and mailbox pointer"
 grep -q 'delivery confirmed: normal-injection.md' "$case_root/watcher.log" || fail "normal injection is logged as confirmed"
 pass "normal injection creates sidecar only after ok"
 
